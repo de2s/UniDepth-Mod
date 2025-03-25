@@ -13,3 +13,9 @@ ___*.py
 **/build/
 **/dist/
 **/*.egg-info/
+
+# VScode
+.vscode/
+
+# Jupyter files
+**/.ipynb_checkpoints

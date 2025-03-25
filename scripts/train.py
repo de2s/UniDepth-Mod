@@ -392,7 +392,7 @@ def main_worker(config: Dict[str, Any], args: argparse.Namespace):
         if track_pbar:
             pbar = tqdm(total=n_steps - init_steps)
 
-    scaler = torch.amp.GradScaler("cuda", enabled=f16)
+    scaler = torch.cuda.amp.GradScaler(enabled=f16)
     track_losses = {}
     system_memory = dict(psutil.virtual_memory()._asdict())["available"] / 2**30
     cpid_memory = current_process.memory_info()[0] / 2.0**30
@@ -400,6 +400,8 @@ def main_worker(config: Dict[str, Any], args: argparse.Namespace):
 
     while True:
         for j, batches in enumerate(train_loader):
+            
+            print(f"Batch: {j}")
 
             system_memory = (
                 0.99 * system_memory
@@ -536,6 +538,14 @@ def main_worker(config: Dict[str, Any], args: argparse.Namespace):
 
 
 if __name__ == "__main__":
+
+    # DEBUG
+    import debugpy
+    debugpy.listen(('0.0.0.0', 5678))
+    print("Waiting for debugger to attach...")
+    debugpy.wait_for_client()  # This will pause execution until a debugger is attached
+    print("Debugger attached. Continuing execution...")
+    
     # dummy folder to avoid Triton conflicts on multi-node training with slurm
     if "SLURM_PROCID" in os.environ:
         os.environ["TRITON_CACHE_DIR"] = "/tmp"
