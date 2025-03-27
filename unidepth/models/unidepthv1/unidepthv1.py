@@ -392,7 +392,8 @@ class UniDepthV1(
 
     def build_losses(self, config):
         self.losses = {}
-        for loss_name, loss_config in config["training"]["losses"].items():
+        # for loss_name, loss_config in config["training"]["losses"].items():
+        for loss_name, loss_config in config["training"].get("losses", {}).items():
             mod = importlib.import_module("unidepth.ops.losses")
             loss_factory = getattr(mod, loss_config["name"])
             self.losses[loss_name] = loss_factory.build(loss_config)

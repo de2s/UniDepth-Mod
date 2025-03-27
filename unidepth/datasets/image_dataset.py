@@ -128,6 +128,28 @@ class ImageDataset(BaseDataset):
         return results
 
     def preprocess(self, results):
+
+        # update fields common in sequence
+        for key in [
+            "image_fields",
+            "gt_fields",
+            "mask_fields",
+            "camera_fields",
+            # "paddings",
+        ]:
+            if key in results[(0, 0)]:
+                results[(0, 0)][key] = results[key]
+        for key in [
+            "image_fields",
+            "gt_fields",
+            "mask_fields",
+            "camera_fields",
+            # "paddings",
+        ]:
+            if key in results:
+                for k, v in enumerate(results[key]):
+                    results[(0, 0)][v] = results[v]
+
         results = self.replicate(results)
         for i, seq in enumerate(results["sequence_fields"]):
             print(self.__class__.__name__, i, seq, results[seq].keys())

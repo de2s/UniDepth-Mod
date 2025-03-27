@@ -37,9 +37,11 @@ def demo(model):
 
 if __name__ == "__main__":
     print("Torch version:", torch.__version__)
-    name = "unidepth-v2-vitl14"
-    # model = UniDepthV1.from_pretrained("lpiccinelli/unidepth-v1-vitl14")
-    model = UniDepthV2.from_pretrained(f"lpiccinelli/{name}")
+    
+    model = UniDepthV1.from_pretrained("lpiccinelli/unidepth-v1-vitl14")
+    
+    # name = "unidepth-v2-vitl14"
+    # model = UniDepthV2.from_pretrained(f"lpiccinelli/{name}")
 
     # set resolution level (only V2)
     # model.resolution_level = 0

@@ -10,3 +10,10 @@ _*.sh
 
 # package
 unidepth.egg-info
+
+# cache files
+/cache/
+
+# vscode files
+/.vscode/
+/.devcontainer/
