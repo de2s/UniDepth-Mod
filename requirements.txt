@@ -3,6 +3,7 @@ attrs
 black
 blosc2
 botocore==1.34.54
+debugpy
 certifi==2022.12.7
 charset-normalizer
 click
