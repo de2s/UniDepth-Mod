@@ -533,6 +533,13 @@ def main_worker(config: Dict[str, Any], args: argparse.Namespace):
                 if is_main_process() and track_pbar:
                     pbar.close()
                 wandb.finish(0)
+                
+                # SAVE MODEL
+                data_folder = os.environ["DATA"]
+                if not os.path.exists(data_folder):
+                    os.makedirs(data_folder)
+                torch.save(ddp_model.state_dict(), f'data_folder/models/unidepth_{now().strftime("%Y-%m-%d_%H-%M-%S")}.pth')
+
                 dist.destroy_process_group()
                 return 0
 

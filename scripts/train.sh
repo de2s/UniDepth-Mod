@@ -9,7 +9,8 @@ export CACHE="$REPO/cache"
 export TORCH_HOME=${CACHE}
 export HUGGINGFACE_HUB_CACHE=${CACHE}
 export WANDB_HOME=${CACHE}
-export DATAROOT="/datasets"
+export DATAROOT="/data/datasets"
+export DATA="/data"
 
 # this is the config will be used
 export CFG="train_v1_vitl14_mod.json"
