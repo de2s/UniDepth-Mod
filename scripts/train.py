@@ -397,6 +397,13 @@ def main_worker(config: Dict[str, Any], args: argparse.Namespace):
     cpid_memory = current_process.memory_info()[0] / 2.0**30
     gpu_mem = (torch.cuda.mem_get_info()[1] - torch.cuda.mem_get_info()[0]) / 2**30
 
+    # DEFINE MODELS NAME
+    models_folder = os.path.join(os.environ["DATA"], "models")
+    os.makedirs(models_folder, exist_ok=True)
+    model_checkpoint = None
+    model_best = None
+    last_error = None
+    
     while True:
         for j, batches in enumerate(train_loader):
 
@@ -520,12 +527,29 @@ def main_worker(config: Dict[str, Any], args: argparse.Namespace):
                 ddp_model.eval()
                 start_validation = time()
                 with torch.no_grad(), ema_handle.average_parameters():
-                    validate(
+                    metrics = validate(
                         model, test_loaders=val_loaders, step=step, context=context
                     )
 
                 if is_main_process():
                     print(f"Elapsed: {format_seconds(int(time() - start_validation))}")
+
+                    # SAVE MODEL PARAMETERS
+                    current_error = metrics["IBims"]["arel"]
+                    if last_error == None or current_error <= last_error:
+                        if model_best and os.path.exists(model_best):
+                            os.remove(model_best)
+                        last_error = current_error
+                        model_best = os.path.join(models_folder, f'unidepth_best_{dt.now().strftime("%Y-%m-%d_%H-%M-%S")}.pth')
+                        torch.save(ddp_model.state_dict(), model_best)
+                        print(f"Saving best model: {model_best}")
+                    if model_checkpoint and os.path.exists(model_checkpoint):
+                        os.remove(model_checkpoint)
+                    model_checkpoint = os.path.join(models_folder, f'unidepth_checkpoint_{dt.now().strftime("%Y-%m-%d_%H-%M-%S")}.pth')
+                    torch.save(ddp_model.state_dict(), model_checkpoint)
+                    print(f"Saving checkpoint: {model_checkpoint}")
+
+
                 ddp_model.train()
                 torch.cuda.empty_cache()
 
@@ -533,13 +557,6 @@ def main_worker(config: Dict[str, Any], args: argparse.Namespace):
                 if is_main_process() and track_pbar:
                     pbar.close()
                 wandb.finish(0)
-                
-                # SAVE MODEL
-                data_folder = os.environ["DATA"]
-                if not os.path.exists(data_folder):
-                    os.makedirs(data_folder)
-                torch.save(ddp_model.state_dict(), f'data_folder/models/unidepth_{now().strftime("%Y-%m-%d_%H-%M-%S")}.pth')
-
                 dist.destroy_process_group()
                 return 0
 
@@ -547,11 +564,14 @@ def main_worker(config: Dict[str, Any], args: argparse.Namespace):
 if __name__ == "__main__":
 
     # Start Python Debugger
-    # import debugpy
-    # debugpy.listen(5678)
-    # print("Waiting for debugger attach")
-    # debugpy.wait_for_client()
-    # debugpy.breakpoint()
+    # debug = os.environ["DEBUG"]
+    debug = False
+    if debug:
+        import debugpy
+        debugpy.listen(5678)
+        print("Waiting for debugger attach")
+        debugpy.wait_for_client()
+        debugpy.breakpoint()
 
     # dummy folder to avoid Triton conflicts on multi-node training with slurm
     if "SLURM_PROCID" in os.environ:

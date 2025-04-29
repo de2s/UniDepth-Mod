@@ -4,10 +4,9 @@
        "deterministic":true
     },
     "training":{
-       "N_ITER_BACKUP":300000,
-       "n_iters":100,
+       "n_iters":300000,
        "batch_size":8,
-       "validation_interval":10,
+       "validation_interval":50,
        "nsteps_accumulation_gradient":4,
        "use_checkpoint":false,
        "lr":1e-4,
