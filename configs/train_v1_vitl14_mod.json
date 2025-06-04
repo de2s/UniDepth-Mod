@@ -4,9 +4,10 @@
        "deterministic":true
     },
     "training":{
-       "n_iters":300000,
+       "n_iters":60000,
+       "_BAKCUP_n_iters":300000,
+       "validation_interval":200,
        "batch_size":8,
-       "validation_interval":50,
        "nsteps_accumulation_gradient":4,
        "use_checkpoint":false,
        "lr":1e-4,
@@ -84,8 +85,8 @@
                 0.66,
                 2.0
              ],
-             "pixels_max":200000,
-             "pixels_min":400000,
+             "pixels_max":250000,
+             "pixels_min":250000,
              "height_min":15,
              "width_min":15,
              "shape_mult":14,
@@ -109,7 +110,7 @@
        "pixel_encoder":{
           "name":"dinov2_vitl14",
           "norm":true,
-          "pretrained":"",
+          "pretrained":"cache/models/pretrained/dinov2_vitl14_pretrain_unidepth.pth",
           "lr":1e-5,
           "frozen_stages":0
        }
