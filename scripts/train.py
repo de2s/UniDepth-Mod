@@ -564,14 +564,11 @@ def main_worker(config: Dict[str, Any], args: argparse.Namespace):
 if __name__ == "__main__":
 
     # Start Python Debugger
-    # debug = os.environ["DEBUG"]
-    debug = False
-    if debug:
+    if "DEBUG" in os.environ:
         import debugpy
         debugpy.listen(5678)
         print("Waiting for debugger attach")
         debugpy.wait_for_client()
-        debugpy.breakpoint()
 
     # dummy folder to avoid Triton conflicts on multi-node training with slurm
     if "SLURM_PROCID" in os.environ:
