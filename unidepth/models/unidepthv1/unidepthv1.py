@@ -192,7 +192,7 @@ class UniDepthV1(
         losses_to_be_computed = list(self.losses.keys())
 
         # depth loss
-        si = torch.tensor([x.get("si", False) for x in image_metas], device=self.device)
+        si = torch.tensor([x.get("si", False) for x in image_metas], device=self.device).reshape(-1, 1)
         loss = self.losses["depth"]
         depth_losses = loss(
             outputs["depth"],
@@ -212,9 +212,7 @@ class UniDepthV1(
         losses_to_be_computed.remove("camera")
 
         # invariance loss
-        flips = torch.tensor(
-            [x.get("flip", False) for x in image_metas], device=self.device
-        ).T
+        flips = torch.tensor([x.get("flip", False) for x in image_metas], device=self.device).reshape(-1, 1)
         loss = self.losses["invariance"]
         invariance_losses = loss(
             outputs["cond_features"],
