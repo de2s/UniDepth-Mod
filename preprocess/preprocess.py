@@ -243,9 +243,54 @@ def process_sequence(ranked_sequence):
                 record["num_features_image_b"] = len(keypoints_b)
                 record["num_matched_features"] = len(matched_keypoints_a)
 
+                # We need minimum 5 matches
+                if len(matched_keypoints_a) >= 5:
+    
+                    # Estimate relative camera poses from 3D reconstructions
+                    result = estimate_camera_pose(matched_keypoints_a, k_a, matched_keypoints_b, k_b)
+                    E_est = result["E"]
+                    R_est = result["R"]
+                    t_est = result["t"]
+                    
+                    # Estimate relative camera poses from groundtruth
+                    t_b = cam2w_b[:,3]                    # Extract location from second camera extrinsics matrix
+                    inv_cam2w_a = invert_matrix(cam2w_a)  # Calculate inverse extrinsics matrix for first image.
+                    t_gt = inv_cam2w_a @ t_b              # Calculate position of the second camera in reference to the first camera
+                    t_gt = t_gt[:3]
+                    
+                    # Calcualte angle between estimated and labeled camera relative positions
+                    t_est_norm = t_est / np.linalg.norm(t_est) # Normalize estimated translation vector
+                    t_gt_norm = t_gt / np.linalg.norm(t_gt)     # Normalize calculated translation vector
+    
+                    # Calculate dot product and estimate angle between two translation vectors (estimated, groun truth)
+                    dot_product = np.abs(np.dot(t_est_norm, t_gt_norm))
+                    theta_1 = np.degrees(np.arccos(dot_product))
+    
+                    # Claculate relative rotation from ground truth
+                    R_a = cam2w_a[0:3, 0:3] # Extract rotation matrix from homogeneous matrix
+                    R_b = cam2w_b[0:3, 0:3]
+                    inv_R_a = invert_matrix(R_a) # Invert first rotation matrix
+                    R_gt = inv_R_a @ R_b # Calculate difference in rotations from first and second camera
+    
+                    # Compare estimated and ground truth rotations
+                    inv_R_gt =  invert_matrix(R_gt)
+                    R_rel = inv_R_gt @ R_est
+    
+                    # Estimate angle between both directions
+                    theta_2 = np.degrees(np.arccos((np.trace(R_rel) - 1) / 2))
+
+                    # Log
+                    record["theta_1"] = theta_1
+                    record["theta_2"] = theta_2
+                
+                else:
+                    
+                    record["error"] = "Insufficient number of matches"
+                    continue
+
             except Exception as ex:
                 record["error"] = str(ex)
-                break
+                continue
                                 
             finally:
                 # Save record to JSON lines
