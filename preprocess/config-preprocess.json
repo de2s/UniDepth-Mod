@@ -3,6 +3,8 @@
         "current_version": null,
         "new_version": "2.0.0",
         "datasets": [
+            "Waymo", 
+            "Argoverse2",
             "ScanNet"
         ],
         "steps": {
@@ -12,8 +14,10 @@
         },
         "matching": {
             "num_workers": 2, 
-            "max_windows_size": 20,
+            "max_windows_size": 50,
             "superglue_models": {
+                "Waymo": "outdoor", 
+                "Argoverse2": "outdoor",
                 "ScanNet": "indoor"
             }
         }
