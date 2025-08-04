@@ -180,6 +180,14 @@ def ssi(
     input_normalized = (input - input_mean) / FNS["sqrt"](input_var)
     return input_normalized, target_normalized, stable_mask
 
+@torch.jit.script
+def split_even_odd(batch: torch.Tensor, dim: int = 0):
+    indices0 = torch.arange(0, batch.size(0), 2, device=batch.device)
+    indices1 = torch.arange(1, batch.size(0), 2, device=batch.device)
+    batch0 = batch.index_select(0, indices0)
+    batch1 = batch.index_select(0, indices1)
+    return batch0, batch1
+    
 
 def ind2sub(idx, cols):
     r = idx // cols

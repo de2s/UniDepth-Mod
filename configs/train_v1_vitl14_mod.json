@@ -23,30 +23,36 @@
        "f16":true,
        "clipping":1.0,
        "losses":{
-          "depth":{
-             "name":"SILog",
-             "weight":1.0,
-             "output_fn":"sqrt",
-             "input_fn":"log",
-             "dims":[
+          "depth": {
+             "name": "SILog",
+             "weight": 1.0,
+             "output_fn": "sqrt",
+             "input_fn": "log",
+             "dims": [
                 -2,
                 -1
              ],
-             "integrated":0.15
+             "integrated": 0.15
           },
-          "invariance":{
-             "name":"SelfDistill",
-             "weight":0.1,
-             "output_fn":"sqrt"
+          "camera": {
+             "name": "Regression",
+             "weight": 0.25,
+             "gamma": 1.0,
+             "alpha": 1.0,
+             "fn": "l2",
+             "output_fn": "sqrt",
+             "input_fn": "linear"
           },
-          "camera":{
-             "name":"Regression",
-             "weight":0.25,
-             "gamma":1.0,
-             "alpha":1.0,
-             "fn":"l2",
-             "output_fn":"sqrt",
-             "input_fn":"linear"
+          "invariance": {
+            "name": "SelfDistill",
+            "weight": 0.1,
+            "output_fn": "sqrt"
+          },
+          "equivariance": {
+             "name": "EqSelfDistill",
+             "weight": 0.1,
+             "output_fn": "sqrt",
+             "use_gt": true
           }
        }
     },
@@ -56,10 +62,14 @@
           640
        ],
        "normalization":"imagenet",
-       "num_copies":2,
-       "num_frames":1,
+       "num_copies":1,
+       "num_frames":2,
        "sampling":{
           "ScanNet":1.0
+       },
+       "sampling_mode": "continuous",
+       "sampling_window_size": {
+           "ScanNet": 2
        },
        "train_datasets":[
           "ScanNet"

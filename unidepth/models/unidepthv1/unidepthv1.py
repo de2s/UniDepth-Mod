@@ -223,6 +223,23 @@ class UniDepthV1(
         losses["opt"][loss.name] = loss.weight * invariance_losses.mean()
         losses_to_be_computed.remove("invariance")
 
+        # Equivariant loss
+        flips = torch.tensor([x.get("flip", False) for x in image_metas], device=self.device).reshape(-1, 1)
+        loss = self.losses["equivariance"]
+        invariance_losses = loss(
+            image = inputs["image_original"], # TODO: TEMP
+            feature = outputs["cond_features"],
+            depth = inputs["depth"],
+            intrinsics = inputs["camera"].K,
+            estimated_depth = outputs["depth"],
+            estimated_intrinsics = outputs["intrinsics"],
+            extrinsics = inputs["cam2w"],
+            mask = inputs["depth_mask"],
+            flips = flips,
+        )
+        losses["opt"][loss.name] = loss.weight * invariance_losses.mean()
+        losses_to_be_computed.remove("equivariance")
+
         # remaining losses, we expect no more losses to be computed
         assert (
             not losses_to_be_computed

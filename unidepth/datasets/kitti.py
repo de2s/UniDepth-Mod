@@ -135,7 +135,8 @@ class KITTI(ImageDataset):
                 raise IndexError(f"Too few points in depth map ({num_pts})")
 
             for key in results[seq].get("image_fields", ["image"]):
-                results[seq][key] = results[seq][key].to(torch.float32) / 255
+                if "original" not in key:
+                    results[seq][key] = results[seq][key].to(torch.float32) / 255
 
         # update fields common in sequence
         for key in ["image_fields", "gt_fields", "mask_fields", "camera_fields"]:

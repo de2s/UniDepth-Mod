@@ -53,6 +53,28 @@ def generate_rays(
     return ray_directions, angles
 
 
+# Define function to calculate inverse matrix
+@torch.jit.script
+def invert_matrix(T):
+
+    W, H = T.shape[-2:]
+    if W == 3 and H == 3:
+        R_inv = T.transpose(-2,-1)
+        return R_inv
+    elif W == 4 and H == 4:
+        R = T[:, :3, :3]              # Rotation part
+        t = T[:, :3, 3]               # Translation part
+        t = t.unsqueeze(-1) 
+        R_inv = R.transpose(-2, -1)   # Transpose of rotation matrix
+        t_inv = -torch.bmm(R_inv, t)  # Inverted translation
+        T_inv = torch.zeros_like(T)
+        T_inv[:, :3, :3] = R_inv
+        T_inv[:, :3, 3] = t_inv.squeeze(-1)
+        T_inv[:, 3, 3] = 1.0
+        return T_inv
+    else:
+        raise RuntimeError("Shape not supported")
+    
 @torch.jit.script
 def spherical_zbuffer_to_euclidean(spherical_tensor: torch.Tensor) -> torch.Tensor:
     theta = spherical_tensor[..., 0]  # Extract polar angle

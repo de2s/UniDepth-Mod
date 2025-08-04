@@ -46,6 +46,8 @@ class SequenceDataset(BaseDataset):
         benchmark: bool = False,
         decode_fields: list[str] = ["image", "depth", "flow_fwd", "flow_fwd_mask"],
         inplace_fields: list[str] = ["K", "cam2w"],
+        sampling_mode: str = "continuous",
+        sampling_window_size: int = 2,
         **kwargs,
     ) -> None:
         super().__init__(
@@ -67,6 +69,8 @@ class SequenceDataset(BaseDataset):
         self.fps_range = kwargs.get("fps_range", None)
         if self.fps_range is not None:
             self.fps_range[1] = min(self.default_fps, self.fps_range[1])
+        self.sampling_mode = sampling_mode
+        self.sampling_window_size = sampling_window_size
 
         self.load_dataset()
 
@@ -120,37 +124,51 @@ class SequenceDataset(BaseDataset):
                 "Cannot sample more frames than available in the sequence."
             )
 
-        # Restrict FPS range to be within default FPS
-        min_fps, max_fps = self.fps_range
-        max_fps = min(max_fps, self.default_fps)
-        if min_fps > self.default_fps:
-            sampled_fps = self.default_fps
+        if self.sampling_mode == "continuous":
+
+            # Restrict FPS range to be within default FPS
+            min_fps, max_fps = self.fps_range
+            max_fps = min(max_fps, self.default_fps)
+            if min_fps > self.default_fps:
+                sampled_fps = self.default_fps
+            else:
+                # Compute minimal viable FPS
+                min_required_fps = (
+                    self.num_frames / num_samples_sequence
+                ) * self.default_fps
+                min_fps = max(min_fps, min_required_fps)
+
+                # Sample an FPS from the viable range
+                sampled_fps = np.random.uniform(min_fps, max_fps)
+
+            # Compute the stride based on the sampled FPS
+            stride = self.default_fps / sampled_fps
+            max_start_index = num_samples_sequence - int(stride * (self.num_frames - 1))
+
+            # Ensure a valid starting position
+            if max_start_index <= 0:
+                raise ValueError(
+                    "No valid start position allows sampling num_frames with the chosen FPS."
+                )
+
+            start_index = np.random.randint(0, max_start_index + 1)
+
+            # Compute indices based on the sampled FPS
+            indices = [int(start_index + i * stride) for i in range(self.num_frames)]
+
+            return indices, np.random.randint(0, len(indices))
+        
+        elif self.sampling_mode == "neighboor":
+
+            # Get the first index
+            idx1 = np.random.randint(0, num_samples_sequence - self.sampling_window_size)
+            idx2 = np.random.randint(idx1 + 1, idx1 + self.sampling_window_size)
+            indices = [idx1, idx2]
+            return indices, np.random.randint(0, len(indices))
+        
         else:
-            # Compute minimal viable FPS
-            min_required_fps = (
-                self.num_frames / num_samples_sequence
-            ) * self.default_fps
-            min_fps = max(min_fps, min_required_fps)
+            raise ValueError("Sampling method not implemented")
 
-            # Sample an FPS from the viable range
-            sampled_fps = np.random.uniform(min_fps, max_fps)
-
-        # Compute the stride based on the sampled FPS
-        stride = self.default_fps / sampled_fps
-        max_start_index = num_samples_sequence - int(stride * (self.num_frames - 1))
-
-        # Ensure a valid starting position
-        if max_start_index <= 0:
-            raise ValueError(
-                "No valid start position allows sampling num_frames with the chosen FPS."
-            )
-
-        start_index = np.random.randint(0, max_start_index + 1)
-
-        # Compute indices based on the sampled FPS
-        indices = [int(start_index + i * stride) for i in range(self.num_frames)]
-
-        return indices, np.random.randint(0, len(indices))
 
     def get_test_idxs(self, num_samples_sequence, keyframe_idx):
         if self.num_frames == 1:
@@ -242,8 +260,10 @@ class SequenceDataset(BaseDataset):
         return results
 
     def preprocess(self, results):
-        results = self.replicate(results)
+        # TODO: THIS INSTRUCTION IS ONLY CREATING A COPY OF THE FIRST SEQUENCE!!!
+        results = self.replicate(results) 
         for i, seq in enumerate(results["sequence_fields"]):
+            # TODO: DO WE NEED TO APPLY CONTEXT CROP TO NEW STRATEGY??? I THINK THE CROP IS TO LARGE TO WARRANTYY OVERLAPING BETWEEN NEIGHBOOR IMAGES
             results[seq] = self.resizer(results[seq])
             self.resizer.ctx = None if self.num_copies > 1 else self.resizer.ctx
             num_pts = torch.count_nonzero(results[seq]["depth"] > 0)
@@ -251,7 +271,8 @@ class SequenceDataset(BaseDataset):
                 raise IndexError(f"Too few points in depth map ({num_pts})")
 
             for key in results[seq].get("image_fields", ["image"]):
-                results[seq][key] = results[seq][key].to(torch.float32) / 255
+                if "original" not in key:
+                    results[seq][key] = results[seq][key].to(torch.float32) / 255
 
         # update fields common in sequence
         for key in [
@@ -269,7 +290,9 @@ class SequenceDataset(BaseDataset):
     def postprocess(self, results):
         # # normalize after because color aug requires [0,255]?
         for key in results.get("image_fields", ["image"]):
-            results[key] = TF.normalize(results[key], **self.normalization_stats)
+            if "original" not in key:
+                results[key] = TF.normalize(results[key], **self.normalization_stats)
+
         results = self.filler(results)
         results = self.unpack_batch(results)
         results = self.masker(results)

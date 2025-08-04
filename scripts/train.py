@@ -180,7 +180,7 @@ def main_worker(config: Dict[str, Any], args: argparse.Namespace):
     augmentations_db = config["data"].get("augmentations", {})
     image_shape = config["data"]["image_shape"]
     nsteps_accumulation_gradient = config["training"]["nsteps_accumulation_gradient"]
-    batch_size = config["training"]["batch_size"] // config["data"]["num_copies"]
+    batch_size = config["training"]["batch_size"] // (config["data"]["num_copies"] * config["data"]["num_frames"])
 
     is_shell = int(os.environ.get("SHELL_JOB", 0))
     run_id = sync_string_across_gpus(
@@ -205,7 +205,9 @@ def main_worker(config: Dict[str, Any], args: argparse.Namespace):
                 config["training"]["batch_size"]
                 * args.world_size
                 * config["data"]["num_copies"]
+                * config["data"]["num_frames"]
             )
+        
         wandb.init(
             project="UniDepth",
             name=run_id,
@@ -213,6 +215,7 @@ def main_worker(config: Dict[str, Any], args: argparse.Namespace):
             tags=None,
             notes=notes,
             dir=os.environ.get("WANDB_HOME", os.environ.get("TMPDIR", "/tmp")),
+            mode="disabled" if "DEBUG" in os.environ else None,
         )
         wandb.watch(model)
 
@@ -236,8 +239,10 @@ def main_worker(config: Dict[str, Any], args: argparse.Namespace):
             resize_method=resize_method,
             mini=1.0,
             num_copies=config["data"]["num_copies"],
-            num_frames=1,
+            num_frames=config["data"]["num_frames"],
             fps_range=[1, 30],
+            sampling_mode=config["data"]["sampling_mode"],
+            sampling_window_size = config["data"]["sampling_window_size"][dataset],
         )
         dim = (
             train_datasets[dataset].dataset._addr.numel() * 8
@@ -257,8 +262,8 @@ def main_worker(config: Dict[str, Any], args: argparse.Namespace):
 
     barrier()
 
-    assert batch_size % nsteps_accumulation_gradient == 0
-    batch_chunk = batch_size // nsteps_accumulation_gradient
+    assert batch_size % nsteps_accumulation_gradient == 0 # TEMP: 4 % 4 = 0
+    batch_chunk = batch_size // nsteps_accumulation_gradient # TEMP: batch_chunk = 1 = 4 // 4
 
     train_dataset = ConcatDataset(
         [t for t in train_datasets.values()],
@@ -565,6 +570,7 @@ if __name__ == "__main__":
 
     # Start Python Debugger
     if "DEBUG" in os.environ:
+        # Wait for debugger attach
         import debugpy
         debugpy.listen(5678)
         print("Waiting for debugger attach")

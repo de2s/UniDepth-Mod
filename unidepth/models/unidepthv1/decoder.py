@@ -446,7 +446,7 @@ class Decoder(nn.Module):
                 original_shapes=(H, W),
                 rays=inputs.get("rays", None),
             )
-            if not self.skip_camera
+            if not self.skip_camera # NOTE: THIS IS FALSE FOR CURRENT CONFIGURATION
             else (inputs["K"], inputs["rays"])
         )
 

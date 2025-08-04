@@ -575,7 +575,8 @@ class RandomColor:
 
     def _adjust_color_img(self, results, factor=1.0):
         for key in results.get("image_fields", ["image"]):
-            results[key] = TF.adjust_hue(results[key], factor)  # .to(img.dtype)
+            if "original" not in key:
+                results[key] = TF.adjust_hue(results[key], factor)  # .to(img.dtype)
 
     def __call__(self, results):
         if np.random.random() > self.prob:
@@ -597,8 +598,9 @@ class RandomSaturation:
 
     def _adjust_saturation_img(self, results, factor=1.0):
         for key in results.get("image_fields", ["image"]):
-            # NOTE defaultly the image should be BGR format
-            results[key] = TF.adjust_saturation(results[key], factor)  # .to(img.dtype)
+            if "original" not in key:
+                # NOTE defaultly the image should be BGR format
+                results[key] = TF.adjust_saturation(results[key], factor)  # .to(img.dtype)
 
     def __call__(self, results):
         if np.random.random() > self.prob:
@@ -620,8 +622,9 @@ class RandomSharpness:
 
     def _adjust_sharpeness_img(self, results, factor=1.0):
         for key in results.get("image_fields", ["image"]):
-            # NOTE defaultly the image should be BGR format
-            results[key] = TF.adjust_sharpness(results[key], factor)  # .to(img.dtype)
+            if "original" not in key:
+                # NOTE defaultly the image should be BGR format
+                results[key] = TF.adjust_sharpness(results[key], factor)  # .to(img.dtype)
 
     def __call__(self, results):
         if np.random.random() > self.prob:
@@ -649,7 +652,8 @@ class RandomSolarize:
 
     def _adjust_solarize_img(self, results, factor=255.0):
         for key in results.get("image_fields", ["image"]):
-            results[key] = TF.solarize(results[key], factor)  # .to(img.dtype)
+            if "original" not in key:
+                results[key] = TF.solarize(results[key], factor)  # .to(img.dtype)
 
     def __call__(self, results):
         if np.random.random() > self.prob:
@@ -671,7 +675,8 @@ class RandomPosterize:
 
     def _posterize_img(self, results, factor=1.0):
         for key in results.get("image_fields", ["image"]):
-            results[key] = TF.posterize(results[key], int(factor))  # .to(img.dtype)
+            if "original" not in key:
+                results[key] = TF.posterize(results[key], int(factor))  # .to(img.dtype)
 
     def __call__(self, results):
         if np.random.random() > self.prob:
@@ -692,7 +697,8 @@ class RandomEqualize:
 
     def _imequalize(self, results):
         for key in results.get("image_fields", ["image"]):
-            results[key] = TF.equalize(results[key])  # .to(img.dtype)
+            if "original" not in key:
+                results[key] = TF.equalize(results[key])  # .to(img.dtype)
 
     def __call__(self, results):
         if np.random.random() > self.prob:
@@ -709,7 +715,8 @@ class RandomBrightness:
 
     def _adjust_brightness_img(self, results, factor=1.0):
         for key in results.get("image_fields", ["image"]):
-            results[key] = TF.adjust_brightness(results[key], factor)  # .to(img.dtype)
+            if "original" not in key:
+                results[key] = TF.adjust_brightness(results[key], factor)  # .to(img.dtype)
 
     def __call__(self, results, level=None):
         if np.random.random() > self.prob:
@@ -731,7 +738,8 @@ class RandomContrast:
 
     def _adjust_contrast_img(self, results, factor=1.0):
         for key in results.get("image_fields", ["image"]):
-            results[key] = TF.adjust_contrast(results[key], factor)  # .to(img.dtype)
+            if "original" not in key:
+                results[key] = TF.adjust_contrast(results[key], factor)  # .to(img.dtype)
 
     def __call__(self, results, level=None):
         if np.random.random() > self.prob:
@@ -780,8 +788,9 @@ class RandomAutoContrast:
 
     def _autocontrast_img(self, results):
         for key in results.get("image_fields", ["image"]):
-            img = results[key]
-            results[key] = TF.autocontrast(img)  # .to(img.dtype)
+            if "original" not in key:
+                img = results[key]
+                results[key] = TF.autocontrast(img)  # .to(img.dtype)
 
     def __call__(self, results):
         if np.random.random() > self.prob:
@@ -1381,9 +1390,10 @@ class RandomFiller:
         validity_mask = results["validity_mask"].repeat(1, C, 1, 1).bool()
         filler_fn = np.random.choice([fill_noise, fill_black, fill_white, fill_zero])
         for key in results.get("image_fields", ["image"]):
-            results[key][~validity_mask] = filler_fn(
-                size=results[key][~validity_mask].shape, device=results[key].device
-            )
+            if "original" not in key:
+                results[key][~validity_mask] = filler_fn(
+                    size=results[key][~validity_mask].shape, device=results[key].device
+                )
 
     def __call__(self, results):
         # generate mask for filler

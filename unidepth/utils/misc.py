@@ -8,7 +8,6 @@ import torch.nn.functional as F
 from einops import rearrange, reduce, repeat
 from scipy import interpolate
 
-
 @torch.jit.script
 def max_stack(tensors: list[torch.Tensor]) -> torch.Tensor:
     if len(tensors) == 1:
