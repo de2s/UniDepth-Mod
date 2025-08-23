@@ -179,16 +179,17 @@ class UniDepthV1(
             "cond_features": depth_features,
         }
         self.pixel_decoder.test_fixed_camera = False
-        losses = self.compute_losses(outputs, inputs, image_metas)
-
-        return outputs, losses
+        losses, metrics = self.compute_losses(outputs, inputs, image_metas)
+    
+        return outputs, losses, metrics
 
     def compute_losses(self, outputs, inputs, image_metas):
         losses = {"opt": {}, "stat": {}}
+        metrics = {}
         if (
             not self.training
         ):  # only compute losses during training, avoid issues for mismatch size of pred and GT
-            return losses
+            return losses, metrics
         losses_to_be_computed = list(self.losses.keys())
 
         # depth loss
@@ -213,22 +214,51 @@ class UniDepthV1(
 
         # invariance loss
         flips = torch.tensor([x.get("flip", False) for x in image_metas], device=self.device).reshape(-1, 1)
+        idxs = [
+            i * meta["num_copies"] * meta["num_frames"] + j + offset
+            for i, meta in enumerate(image_metas)
+            for j in range(meta["num_frames"])
+            for offset in (0, meta["num_frames"])
+        ]
         loss = self.losses["invariance"]
         invariance_losses = loss(
-            outputs["cond_features"],
-            intrinsics=inputs["camera"].K,
-            mask=inputs["depth_mask"],
-            flips=flips,
+            outputs["cond_features"][idxs],
+            intrinsics=inputs["camera"].K[idxs],
+            mask=inputs["depth_mask"][idxs],
+            flips=flips[idxs],
         )
         losses["opt"][loss.name] = loss.weight * invariance_losses.mean()
         losses_to_be_computed.remove("invariance")
+
+        # Equivariance loss
+        idxs = [
+            i * meta["num_copies"] * meta["num_frames"] + j * meta["num_copies"] + offset
+            for i, meta in enumerate(image_metas)
+            for j in range(meta["num_copies"])
+            for k in range(1, meta["num_frames"])
+            for offset in (0, k)
+        ]
+        loss = self.losses["equivariance"]
+        invariance_losses, metrics = loss(
+            image = None, # Enable when saving intermediate values
+            feature = outputs["cond_features"][idxs],
+            depth = inputs["depth"][idxs],
+            intrinsics = inputs["camera"].K[idxs],
+            estimated_depth = outputs["depth"][idxs],
+            estimated_intrinsics = outputs["intrinsics"][idxs],
+            extrinsics = inputs["cam2w"][idxs],
+            mask = inputs["depth_mask"][idxs],
+            flips = flips[idxs],
+        )
+        losses["opt"][loss.name] = loss.weight * invariance_losses.mean()
+        losses_to_be_computed.remove("equivariance")
 
         # remaining losses, we expect no more losses to be computed
         assert (
             not losses_to_be_computed
         ), f"Losses {losses_to_be_computed} not computed, revise `compute_loss` method"
 
-        return losses
+        return losses, metrics
 
     @torch.no_grad()
     def infer(self, rgbs: torch.Tensor, intrinsics=None, skip_camera=False):
@@ -389,9 +419,10 @@ class UniDepthV1(
         self.image_shape = config["data"]["image_shape"]
 
     def build_losses(self, config):
-        self.losses = {}
+        losses = {}
         # for loss_name, loss_config in config["training"]["losses"].items():
         for loss_name, loss_config in config["training"].get("losses", {}).items():
             mod = importlib.import_module("unidepth.ops.losses")
             loss_factory = getattr(mod, loss_config["name"])
-            self.losses[loss_name] = loss_factory.build(loss_config)
+            losses[loss_name] = loss_factory.build(loss_config)
+        self.losses = nn.ModuleDict(losses)

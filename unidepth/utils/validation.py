@@ -71,7 +71,7 @@ def validate(model, test_loaders, step, context):
                     for meta in batch["img_metas"]
                 ]
 
-                preds, losses = model(batch["data"], batch["img_metas"])
+                preds, losses, metrics = model(batch["data"], batch["img_metas"])
 
             batch, _ = original_image(batch, preds=None)
             test_loader.dataset.accumulate_metrics(

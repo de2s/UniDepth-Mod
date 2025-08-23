@@ -35,7 +35,7 @@ from unidepth.utils.distributed import (barrier, create_local_process_group,
                                         sync_tensor_across_gpus)
 from unidepth.utils.ema_torch import (DummyExponentialMovingAverage,
                                       ExponentialMovingAverage)
-from unidepth.utils.misc import calculate_mean_values, format_seconds
+from unidepth.utils.misc import calculate_mean_values, format_seconds, profile_method, profile_context
 from unidepth.utils.validation import validate
 
 EMA_INTERVAL = 10
@@ -180,7 +180,7 @@ def main_worker(config: Dict[str, Any], args: argparse.Namespace):
     augmentations_db = config["data"].get("augmentations", {})
     image_shape = config["data"]["image_shape"]
     nsteps_accumulation_gradient = config["training"]["nsteps_accumulation_gradient"]
-    batch_size = config["training"]["batch_size"] // config["data"]["num_copies"]
+    batch_size = config["training"]["batch_size"] // (config["data"]["num_copies"] * config["data"]["num_frames"])
 
     is_shell = int(os.environ.get("SHELL_JOB", 0))
     run_id = sync_string_across_gpus(
@@ -205,6 +205,7 @@ def main_worker(config: Dict[str, Any], args: argparse.Namespace):
                 config["training"]["batch_size"]
                 * args.world_size
                 * config["data"]["num_copies"]
+                * config["data"]["num_frames"]
             )
         wandb.init(
             project="UniDepth",
@@ -213,6 +214,7 @@ def main_worker(config: Dict[str, Any], args: argparse.Namespace):
             tags=None,
             notes=notes,
             dir=os.environ.get("WANDB_HOME", os.environ.get("TMPDIR", "/tmp")),
+            mode="disabled" if "DEBUG" in os.environ else None,
         )
         wandb.watch(model)
 
@@ -236,8 +238,10 @@ def main_worker(config: Dict[str, Any], args: argparse.Namespace):
             resize_method=resize_method,
             mini=1.0,
             num_copies=config["data"]["num_copies"],
-            num_frames=1,
+            num_frames=config["data"]["num_frames"],
             fps_range=[1, 30],
+            sampling_mode=config["data"]["sampling_mode"],
+            sampling_window_size = config["data"]["sampling_window_size"][dataset],
         )
         dim = (
             train_datasets[dataset].dataset._addr.numel() * 8
@@ -448,19 +452,28 @@ def main_worker(config: Dict[str, Any], args: argparse.Namespace):
                     for meta in batch["img_metas"]
                 ]
 
+                # tell the model the number of frames and copies for each sample
+                for meta in batch["img_metas"]:
+                    meta["num_copies"] = config["data"]["num_copies"]
+                    meta["num_frames"] = config["data"]["num_frames"]
+
                 with (
                     model.no_sync()
                     if idx < nsteps_accumulation_gradient - 1
                     else nullcontext()
                 ):
                     with context:
-                        preds, losses = model(batch["data"], batch["img_metas"])
+                        # with profile_context("ForwardPassContext", verbose=True):
+                        preds, losses, metrics = model(batch["data"], batch["img_metas"])
                     loss = sum(losses["opt"].values()) / nsteps_accumulation_gradient
+                    # with profile_context("BackwardPassContext", verbose=True):
                     scaler.scale(loss).backward()
-
+                    
                 losses_dict = {
                     k: v.detach() for loss in losses.values() for k, v in loss.items()
                 }
+                # TODO: IT'S A QUICK FIX, IMPLEMENT SEPARATED DICTIONARY TO EXCLUSIVELY LOG METRICS
+                losses_dict.update(metrics)
                 track_losses.update(
                     {
                         k: 0.99 * track_losses.get(k, v)
@@ -563,7 +576,7 @@ def main_worker(config: Dict[str, Any], args: argparse.Namespace):
 
 if __name__ == "__main__":
 
-    # Start Python Debugger
+    # Start Python Debugger and wait for debugger attach
     if "DEBUG" in os.environ:
         import debugpy
         debugpy.listen(5678)

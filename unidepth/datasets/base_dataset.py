@@ -271,9 +271,10 @@ class BaseDataset(Dataset):
         return metric_vals
 
     def replicate(self, results):
-        for i in range(1, self.num_copies):
-            results[(0, i)] = {k: deepcopy(v) for k, v in results[(0, 0)].items()}
-            results["sequence_fields"].append((0, i))
+        for i in range(0, self.num_frames):
+            for j in range(1, self.num_copies):
+                results[(i, j)] = {k: deepcopy(v) for k, v in results[(i, 0)].items()}
+                results["sequence_fields"].append((i, j))
         return results
 
     def log_load_dataset(self):

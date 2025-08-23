@@ -160,7 +160,8 @@ class ImageDataset(BaseDataset):
                 raise IndexError(f"Too few points in depth map ({num_pts})")
 
             for key in results[seq].get("image_fields", ["image"]):
-                results[seq][key] = results[seq][key].to(torch.float32) / 255
+                if "original" not in key:
+                    results[seq][key] = results[seq][key].to(torch.float32) / 255
 
         # update fields common in sequence
         for key in ["image_fields", "gt_fields", "mask_fields", "camera_fields"]:
@@ -172,7 +173,8 @@ class ImageDataset(BaseDataset):
     def postprocess(self, results):
         # normalize after because color aug requires [0,255]?
         for key in results.get("image_fields", ["image"]):
-            results[key] = TF.normalize(results[key], **self.normalization_stats)
+            if "original" not in key:
+                results[key] = TF.normalize(results[key], **self.normalization_stats)
         results = self.filler(results)
         results = self.unpack_batch(results)
         results = self.masker(results)

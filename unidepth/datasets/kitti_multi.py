@@ -77,7 +77,8 @@ class KITTIMulti(SequenceDataset):
             results[seq] = self.cropper_base(results[seq])
             results[seq] = self.resizer(results[seq])
             for key in results[seq].get("image_fields", ["image"]):
-                results[seq][key] = results[seq][key].to(torch.float32) / 255
+                if "original" not in key:
+                    results[seq][key] = results[seq][key].to(torch.float32) / 255
         results.update({k: v for k, v in results[(0, 0)].items() if "fields" in k})
 
         results = self.pack_batch(results)

@@ -199,3 +199,7 @@ def log_train_artifacts(rgbs, gts, preds, ds_name, step, infos={}):
             os.path.join(os.environ["HOME"], "Workspace", f"art_grid{step}.png")
         )
         print("Logging training images failed")
+
+
+def save_tensors(file_path, **tensors):
+    torch.save(tensors, file_path)

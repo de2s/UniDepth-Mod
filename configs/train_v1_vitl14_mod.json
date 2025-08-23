@@ -8,7 +8,7 @@
        "_BAKCUP_n_iters":300000,
        "validation_interval":200,
        "batch_size":8,
-       "nsteps_accumulation_gradient":1,
+       "nsteps_accumulation_gradient":2,
        "use_checkpoint":false,
        "lr":1e-4,
        "lr_final":1e-6,
@@ -23,30 +23,41 @@
        "f16":true,
        "clipping":1.0,
        "losses":{
-          "depth":{
-             "name":"SILog",
-             "weight":1.0,
-             "output_fn":"sqrt",
-             "input_fn":"log",
-             "dims":[
+          "depth": {
+             "name": "SILog",
+             "weight": 1.0,
+             "output_fn": "sqrt",
+             "input_fn": "log",
+             "dims": [
                 -2,
                 -1
              ],
-             "integrated":0.15
+             "integrated": 0.15
           },
-          "invariance":{
-             "name":"SelfDistill",
-             "weight":0.1,
-             "output_fn":"sqrt"
+          "camera": {
+             "name": "Regression",
+             "weight": 0.25,
+             "gamma": 1.0,
+             "alpha": 1.0,
+             "fn": "l2",
+             "output_fn": "sqrt",
+             "input_fn": "linear"
           },
-          "camera":{
-             "name":"Regression",
-             "weight":0.25,
-             "gamma":1.0,
-             "alpha":1.0,
-             "fn":"l2",
-             "output_fn":"sqrt",
-             "input_fn":"linear"
+          "invariance": {
+            "name": "SelfDistill",
+            "weight": 0.1,
+            "output_fn": "sqrt"
+          },
+          "equivariance": {
+             "name": "EqSelfDistill",
+             "weight": 0.1,
+             "output_fn": "sqrt",
+             "feature_dim": 512,
+             "change_base": false,
+             "inverse_change_base": false,
+             "symmetry_group": "SO(n)",
+             "representation_type": "1x0e+1x255e",
+             "use_gt": true
           }
        }
     },
@@ -57,9 +68,13 @@
        ],
        "normalization":"imagenet",
        "num_copies":2,
-       "num_frames":1,
+       "num_frames":2,
        "sampling":{
           "ScanNet":1.0
+       },
+       "sampling_mode": "neighboor",
+       "sampling_window_size": {
+           "ScanNet": 2
        },
        "train_datasets":[
           "ScanNet"

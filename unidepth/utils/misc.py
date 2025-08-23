@@ -523,6 +523,10 @@ def profile_method(track_statistics=True, verbose=False):
     return decorator
 
 
+def profile_context(context_name, track_statistics=True, verbose=False):
+    return ProfileFunction(context_name, track_statistics, verbose)
+
+
 class ProfileFunction:
     def __init__(self, func_name, track_statistics=True, verbose=False):
         self.func_name = func_name
