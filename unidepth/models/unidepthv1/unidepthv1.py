@@ -212,46 +212,50 @@ class UniDepthV1(
         losses["opt"][loss.name] = loss.weight * camera_losses.mean()
         losses_to_be_computed.remove("camera")
 
-        # invariance loss
-        flips = torch.tensor([x.get("flip", False) for x in image_metas], device=self.device).reshape(-1, 1)
-        idxs = [
-            i * meta["num_copies"] * meta["num_frames"] + j + offset
-            for i, meta in enumerate(image_metas)
-            for j in range(meta["num_frames"])
-            for offset in (0, meta["num_frames"])
-        ]
-        loss = self.losses["invariance"]
-        invariance_losses = loss(
-            outputs["cond_features"][idxs],
-            intrinsics=inputs["camera"].K[idxs],
-            mask=inputs["depth_mask"][idxs],
-            flips=flips[idxs],
-        )
-        losses["opt"][loss.name] = loss.weight * invariance_losses.mean()
-        losses_to_be_computed.remove("invariance")
+        # Invariance loss
+        if "invariance" in losses_to_be_computed:
+            flips = torch.tensor([x.get("flip", False) for x in image_metas], device=self.device).reshape(-1, 1)
+            idxs = [
+                i * meta["num_copies"] * meta["num_frames"] + j + offset
+                for i, meta in enumerate(image_metas)
+                for j in range(meta["num_frames"])
+                for offset in (0, meta["num_frames"])
+            ]
+            loss = self.losses["invariance"]
+            invariance_losses = loss(
+                outputs["cond_features"][idxs],
+                intrinsics=inputs["camera"].K[idxs],
+                mask=inputs["depth_mask"][idxs],
+                flips=flips[idxs],
+            )
+            losses["opt"][loss.name] = loss.weight * invariance_losses.mean()
+            losses_to_be_computed.remove("invariance")
 
         # Equivariance loss
-        idxs = [
-            i * meta["num_copies"] * meta["num_frames"] + j * meta["num_copies"] + offset
-            for i, meta in enumerate(image_metas)
-            for j in range(meta["num_copies"])
-            for k in range(1, meta["num_frames"])
-            for offset in (0, k)
-        ]
-        loss = self.losses["equivariance"]
-        invariance_losses, metrics = loss(
-            image = None, # Enable when saving intermediate values
-            feature = outputs["cond_features"][idxs],
-            depth = inputs["depth"][idxs],
-            intrinsics = inputs["camera"].K[idxs],
-            estimated_depth = outputs["depth"][idxs],
-            estimated_intrinsics = outputs["intrinsics"][idxs],
-            extrinsics = inputs["cam2w"][idxs],
-            mask = inputs["depth_mask"][idxs],
-            flips = flips[idxs],
-        )
-        losses["opt"][loss.name] = loss.weight * invariance_losses.mean()
-        losses_to_be_computed.remove("equivariance")
+        if "equivariance" in losses_to_be_computed:
+            flips = torch.tensor([x.get("flip", False) for x in image_metas], device=self.device).reshape(-1, 1)
+            idxs = [
+                i * meta["num_copies"] * meta["num_frames"] + j * meta["num_copies"] + offset
+                for i, meta in enumerate(image_metas)
+                for j in range(meta["num_copies"])
+                for k in range(1, meta["num_frames"])
+                for offset in (0, k)
+            ]
+            loss = self.losses["equivariance"]
+            equivariance_losses, equivariance_metrics = loss(
+                image = None, # Enable when saving intermediate values
+                feature = outputs["cond_features"][idxs],
+                depth = inputs["depth"][idxs],
+                intrinsics = inputs["camera"].K[idxs],
+                estimated_depth = outputs["depth"][idxs],
+                estimated_intrinsics = outputs["intrinsics"][idxs],
+                extrinsics = inputs["cam2w"][idxs],
+                mask = inputs["depth_mask"][idxs],
+                flips = flips[idxs],
+            )
+            losses["opt"][loss.name] = loss.weight * equivariance_losses.mean()
+            losses_to_be_computed.remove("equivariance")
+            metrics.update(equivariance_metrics)
 
         # remaining losses, we expect no more losses to be computed
         assert (
