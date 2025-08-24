@@ -134,19 +134,26 @@ class BaseDataset(Dataset):
         return results
 
     def _augmentation_space(self):
-        self.augmentations_dict = {
-            "Flip": pipelines.RandomFlip(prob=self.flip_p),
-            "Jitter": pipelines.RandomColorJitter(
+
+        # Load augmentations if they are defined
+        self.augmentations_dict = {}
+        if hasattr(self, "flip_p"):
+            self.augmentations_dict["Flip"] = pipelines.RandomFlip(prob=self.flip_p)
+        if hasattr(self, "random_jitter") and hasattr(self, "jitter_p"):
+            self.augmentations_dict["Jitter"] = pipelines.RandomColorJitter(
                 (-self.random_jitter, self.random_jitter), prob=self.jitter_p
-            ),
-            "Gamma": pipelines.RandomGamma(
+            )
+        if hasattr(self, "random_gamma") and hasattr(self, "gamma_p"):
+            self.augmentations_dict["Gamma"] = pipelines.RandomGamma(
                 (-self.random_gamma, self.random_gamma), prob=self.gamma_p
-            ),
-            "Blur": pipelines.GaussianBlur(
+            )
+        if hasattr(self, "random_blur") and hasattr(self, "blur_p"):
+            self.augmentations_dict["Blur"] = pipelines.GaussianBlur(
                 kernel_size=13, sigma=(0.1, self.random_blur), prob=self.blur_p
-            ),
-            "Grayscale": pipelines.RandomGrayscale(prob=self.grayscale_p),
-        }
+            )
+        if hasattr(self, "grayscale_p"):
+            self.augmentations_dict["Grayscale"] = pipelines.RandomGrayscale(prob=self.grayscale_p)
+            
 
     def augment(self, results):
         for name, aug in self.augmentations_dict.items():
