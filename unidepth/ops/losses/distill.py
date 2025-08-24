@@ -188,7 +188,7 @@ class GeneratorSOn(nn.Module):
         input_angles = torch.tensor([alpha, beta, gamma], device=pose_rel.device)
         generator_angles = self.rotation_decoder(input_angles)
 
-        # Assert number of angles
+        # Check number of angles
         nun_angles = self.feature_dim * (self.feature_dim - 1) // 2
         assert generator_angles.numel() == nun_angles
 
@@ -287,7 +287,7 @@ class EqSelfDistill(nn.Module):
         flips: torch.Tensor,
         patch_size=14,
     ) -> Tuple[torch.Tensor, dict]:
-        
+
         # Initialize mertrics
         num_points = []
         num_matched_points = []
@@ -299,16 +299,6 @@ class EqSelfDistill(nn.Module):
         # Choose between ground truth or estimated data
         depth = depth if self.use_gt else estimated_depth
         K = intrinsics if self.use_gt else estimated_intrinsics
-        
-        # Flip back flipped tensors
-        *_, H, W = depth.shape
-        flip_indices = torch.nonzero(flips.view(-1)).squeeze(1)
-        if image:
-            image[flip_indices] = image[flip_indices].flip(dims=(3,))
-        feature[flip_indices] = feature[flip_indices].flip(dims=(3,))
-        depth[flip_indices] = depth[flip_indices].flip(dims=(3,))
-        mask[flip_indices] = mask[flip_indices].flip(dims=(3,))
-        K[flip_indices, 0, 2] = W - 1 - K[flip_indices, 0, 2]
   
         # Generate rays  
         *_, H, W = feature.shape    
@@ -363,13 +353,18 @@ class EqSelfDistill(nn.Module):
         # Iterate samples
         features0, features1 = [], []
         for i in range(B // 2):
-            image0, image1 = (image[2 * i], image[2 * i + 1]) if image else (None, None)
-            points0, points1 = points[2 * i], points[2 * i + 1]
-            feature0, feature1 = feature[2 * i], feature[2 * i + 1]
-            centers0, centers1 = centers[2 * i], centers[2 * i + 1]
-            extrinsics0, extrinsics1 = extrinsics[2 * i], extrinsics[2 * i + 1]
-            mask0, mask1 = mask[2 * i], mask[2 * i + 1]
-            original_mask0, original_mask1 = original_mask[2 * i], original_mask[2 * i + 1]
+            left, right = 2 * i, 2 * i + 1
+            image0, image1 = (image[left], image[right]) if image else (None, None)
+            points0, points1 = points[left], points[right]
+            feature0, feature1 = feature[left], feature[right]
+            centers0, centers1 = centers[left], centers[right]
+            extrinsics0, extrinsics1 = extrinsics[left], extrinsics[right]
+            mask0, mask1 = mask[left], mask[right]
+            original_mask0, original_mask1 = original_mask[left], original_mask[right]
+            flip0, flip1 = flips[left], flips[right]
+
+            # Check that both images were rotated
+            assert flip0 == flip1
 
             if self.use_gt:
                 mask0, mask1 = mask0.squeeze(), mask1.squeeze()
