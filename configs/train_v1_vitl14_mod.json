@@ -4,8 +4,7 @@
        "deterministic":true
     },
     "training":{
-       "n_iters":60000,
-       "_BAKCUP_n_iters":300000,
+       "n_iters":60000, //300000
        "validation_interval":200,
        "batch_size":8,
        "nsteps_accumulation_gradient":2,

@@ -1,5 +1,4 @@
 import argparse
-import json
 import os
 import random
 import uuid
@@ -9,6 +8,7 @@ from functools import partial
 from time import time
 from typing import Any, Dict
 
+import json5
 import git
 import numpy as np
 import psutil
@@ -597,7 +597,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     with open(args.config_file, "r") as f:
-        config = json.load(f)
+        config = json5.load(f)
 
     deterministic = config["generic"].get("deterministic", True)
     torch.backends.cudnn.deterministic = deterministic

@@ -86,3 +86,4 @@ torchaudio==2.2.0
 xformers==0.0.24
 POT
 e3nn
+json5
