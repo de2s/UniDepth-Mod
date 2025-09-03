@@ -443,9 +443,9 @@ class EqSelfDistill(nn.Module):
 
             # Aggregate results
             features0.append(feature0_transformed)
-            features1.append(feature1.detach())
+            features1.append(feature1.clone().detach())
             features0.append(feature1_transformed)
-            features1.append(feature0.detach())
+            features1.append(feature0.clone().detach())
 
         # Compute aggregated loss
         features0 = torch.cat(features0, dim=0) # TODO: VALIDATE IF I CAN MERGE ALL SIMILARITIES, I THINK IT'S OK
