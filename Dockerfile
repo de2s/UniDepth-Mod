@@ -8,7 +8,7 @@ ARG USER_GID=1000
 
 # Install OS requirements
 RUN apt update \
-    && DEBIAN_FRONTEND=noninteractive apt install python3-opencv git -y
+    && DEBIAN_FRONTEND=noninteractive apt install python3-opencv git graphviz -y
 
 # Install Python requirements
 WORKDIR /unidepth

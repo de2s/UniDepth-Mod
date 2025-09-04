@@ -87,3 +87,4 @@ xformers==0.0.24
 POT
 e3nn
 json5
+torchviz
