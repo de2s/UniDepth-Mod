@@ -431,10 +431,10 @@ class EqSelfDistill(nn.Module):
             feature1_transformed = torch.matmul(change_base, feature1.T).T
             
             # Rotate vectors
-            transformation = self.transform_generator.getTransformation(extrinsics0, extrinsics1)
-            feature0_transformed = torch.matmul(transformation, feature0_transformed.T).T
-            transformation = self.transform_generator.getTransformation(extrinsics1, extrinsics0)
-            feature1_transformed = torch.matmul(transformation, feature1_transformed.T).T
+            transformation0 = self.transform_generator.getTransformation(extrinsics0, extrinsics1)
+            feature0_transformed = torch.matmul(transformation0, feature0_transformed.T).T
+            transformation1 = self.transform_generator.getTransformation(extrinsics1, extrinsics0)
+            feature1_transformed = torch.matmul(transformation1, feature1_transformed.T).T
 
             # Revert change of base for the feature vectors
             if self.inverse_change_base:

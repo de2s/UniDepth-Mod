@@ -387,7 +387,10 @@ class UniDepthV1(
         decoder_p, decoder_lr = get_params(
             self.pixel_decoder, config["training"]["lr"], config["training"]["wd"]
         )
-        return [*encoder_p, *decoder_p]
+        losses_p, losses_lr = get_params(
+            self.losses, config["training"]["lr"], config["training"]["wd"]
+        )
+        return [*encoder_p, *decoder_p, *losses_p]
 
     @property
     def device(self):
