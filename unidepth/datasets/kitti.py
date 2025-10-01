@@ -107,7 +107,7 @@ class KITTI(ImageDataset):
             image_filename = line.strip().split(" ")[0]
             depth_filename = line.strip().split(" ")[1]
             if depth_filename == "None":
-                self.invalid_depth_num += 1
+                # self.invalid_depth_num += 1 
                 continue
             sample = [
                 image_filename,
@@ -125,7 +125,7 @@ class KITTI(ImageDataset):
         return self.CAM_INTRINSIC[image_name.split("/")[0]][:, :3].clone()
 
     def preprocess(self, results):
-        results = self.replicate(results)
+        """results = self.replicate(results)
         for i, seq in enumerate(results["sequence_fields"]):
             self.resizer.ctx = None
             results[seq] = self.cropper_base(results[seq])
@@ -143,7 +143,50 @@ class KITTI(ImageDataset):
             if key in results[(0, 0)]:
                 results[key] = results[(0, 0)][key]
         results = self.pack_batch(results)
+        return results"""
+
+        # update fields common in sequence
+        for key in [
+            "image_fields",
+            "gt_fields",
+            "mask_fields",
+            "camera_fields",
+            # "paddings",
+        ]:
+            if key in results[(0, 0)]:
+                results[(0, 0)][key] = results[key]
+        for key in [
+            "image_fields",
+            "gt_fields",
+            "mask_fields",
+            "camera_fields",
+            # "paddings",
+        ]:
+            if key in results:
+                for k, v in enumerate(results[key]):
+                    results[(0, 0)][v] = results[v]
+
+        results = self.replicate(results)
+        for i, seq in enumerate(results["sequence_fields"]):
+            print(self.__class__.__name__, i, seq, results[seq].keys())
+            self.resizer.ctx = None
+            results[seq] = self.cropper_base(results[seq])
+            results[seq] = self.resizer(results[seq])
+            num_pts = torch.count_nonzero(results[seq]["depth"] > 0)
+            if num_pts < 50:
+                raise IndexError(f"Too few points in depth map ({num_pts})")
+
+            for key in results[seq].get("image_fields", ["image"]):
+                if "original" not in key:
+                    results[seq][key] = results[seq][key].to(torch.float32) / 255
+
+        # update fields common in sequence
+        for key in ["image_fields", "gt_fields", "mask_fields", "camera_fields"]:
+            if key in results[(0, 0)]:
+                results[key] = results[(0, 0)][key]
+        results = self.pack_batch(results)
         return results
+    
 
     def eval_mask(self, valid_mask, info={}):
         """Do grag_crop or eigen_crop for testing"""
