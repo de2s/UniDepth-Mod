@@ -21,6 +21,7 @@ from unidepth.utils.distributed import is_main_process
 from unidepth.utils.geometric import (generate_rays,
                                       spherical_zbuffer_to_euclidean)
 from unidepth.utils.misc import get_params, match_gt
+from unidepth.utils import getSummaryWriter, colorize
 
 MAP_BACKBONES = {"ViTL14": "vitl14", "ConvNextL": "cnvnxtl"}
 
@@ -111,8 +112,21 @@ class UniDepthV1(
         self.build_losses(config)
         self.eps = eps
 
-    def forward(self, inputs, image_metas):
+    def forward(self, inputs, image_metas, step):
         rgbs = inputs["image"]
+
+        # Log Input Artifacts with TensorBoard
+        if step % 50 == 0 and self.training:
+            summary_writer = getSummaryWriter()
+            summary_writer.add_images(f"Artifacts/Train/OriginalImage", inputs["image_original"], step, dataformats="NCHW")
+            summary_writer.add_images(f"Artifacts/Train/PreprocessedImage", inputs["image"], step,  dataformats="NCHW")
+            summary_writer.add_images(f"Artifacts/Train/GroundTruthDepth", colorize(inputs["depth"]), step, dataformats="NCHW")
+            summary_writer.add_images(f"Artifacts/Train/DepthMask", inputs["depth_mask"], step, dataformats="NCHW")
+
+            # Log values for each image
+            for i in range(inputs["depth"].shape[0]):
+                summary_writer.add_histogram(f"Artifacts/Train/GroundTruthDepthValues/{i}", inputs["depth"][i:i+1], step)
+
         B, _, H, W = rgbs.shape
         cameras = inputs["camera"]
 
@@ -179,6 +193,19 @@ class UniDepthV1(
             "cond_features": depth_features,
         }
         self.pixel_decoder.test_fixed_camera = False
+
+        # Log Output Artifacts with TensorBoard
+        if step % 50 == 0 and self.training:
+            summary_writer = getSummaryWriter()
+            summary_writer.add_images(f"Artifacts/Train/EstimatedDepth", colorize(outputs["depth"]), step, dataformats="NCHW")
+            summary_writer.add_images(f"Artifacts/Train/DepthError", colorize(outputs["depth"]-inputs["depth"]), step, dataformats="NCHW")
+            # TODO: CALCULATE ERROR
+
+            # Log values for each image
+            for i in range(inputs["depth"].shape[0]):
+                summary_writer.add_histogram(f"Artifacts/Train/EstimatedDepthValues/{i}", outputs["depth"], step)
+            
+        
         losses, metrics = self.compute_losses(outputs, inputs, image_metas)
     
         return outputs, losses, metrics

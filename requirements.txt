@@ -88,3 +88,4 @@ POT
 e3nn
 json5
 torchviz
+tensorboard

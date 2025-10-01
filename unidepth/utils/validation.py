@@ -6,6 +6,8 @@ from torch.nn import functional as F
 from unidepth.utils import barrier, is_main_process
 from unidepth.utils.misc import remove_padding
 
+from unidepth.utils import getSummaryWriter
+
 
 def original_image(batch, preds=None):
     paddings = [
@@ -45,6 +47,10 @@ def original_image(batch, preds=None):
 
 
 def log_metrics(metrics_all, step):
+
+    # Get logger for TensorBoard
+    summary_writer = getSummaryWriter()
+
     for name_ds, metrics in metrics_all.items():
         for metrics_name, metrics_value in metrics.items():
             try:
@@ -52,6 +58,8 @@ def log_metrics(metrics_all, step):
                 wandb.log(
                     {f"Metrics/{name_ds}/{metrics_name}": metrics_value}, step=step
                 )
+                # Log with TensorBoard
+                summary_writer.add_scalar(f"Metrics/{name_ds}/{metrics_name}", metrics_value, step)
             except:
                 pass
 
@@ -71,7 +79,7 @@ def validate(model, test_loaders, step, context):
                     for meta in batch["img_metas"]
                 ]
 
-                preds, losses, metrics = model(batch["data"], batch["img_metas"])
+                preds, losses, metrics = model(batch["data"], batch["img_metas"], step)
 
             batch, _ = original_image(batch, preds=None)
             test_loader.dataset.accumulate_metrics(

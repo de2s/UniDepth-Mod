@@ -456,10 +456,10 @@ class EqSelfDistill(nn.Module):
         num_points = torch.tensor(num_points, device=features0.device)
         num_matched_points = torch.tensor(num_matched_points, device=features0.device)
         avg_num_points = num_points.mean()
-        matched_points  = (num_matched_points / num_points).mean()
+        matched_points_ratio  = (num_matched_points / num_points).mean()
         metrics = {
-            "num_points": avg_num_points,
-            "matched_ratio": matched_points
+            "NumPoints": avg_num_points,
+            "MatchedPointsRatio": matched_points_ratio
         }
  
         return loss, metrics

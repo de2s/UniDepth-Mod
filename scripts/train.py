@@ -37,6 +37,8 @@ from unidepth.utils.ema_torch import (DummyExponentialMovingAverage,
                                       ExponentialMovingAverage)
 from unidepth.utils.misc import calculate_mean_values, format_seconds, profile_method, profile_context
 from unidepth.utils.validation import validate
+from unidepth.utils import getSummaryWriter
+
 
 EMA_INTERVAL = 10
 
@@ -153,10 +155,11 @@ def main_worker(config: Dict[str, Any], args: argparse.Namespace):
         pretrained = torch.load(config["training"]["pretrained"], map_location="cpu")
         try:
             optimizer.load_state_dict(pretrained["optimizer"])
+            step = pretrained["step"]
         except Exception as e:
             if is_main_process():
                 print("Could not load optimizer state dict:", e)
-        step = pretrained["step"]
+        
 
     # EMA
     ema_class = (
@@ -464,7 +467,7 @@ def main_worker(config: Dict[str, Any], args: argparse.Namespace):
                 ):
                     with context:
                         # with profile_context("ForwardPassContext", verbose=True):
-                        preds, losses, metrics = model(batch["data"], batch["img_metas"])
+                        preds, losses, metrics = model(batch["data"], batch["img_metas"], step)
                     loss = sum(losses["opt"].values()) / nsteps_accumulation_gradient
                     # with profile_context("BackwardPassContext", verbose=True):
                     scaler.scale(loss).backward()
@@ -492,6 +495,26 @@ def main_worker(config: Dict[str, Any], args: argparse.Namespace):
             scheduler_wd.step()
             scheduler_lr.step()
             scheduler_betas.step()
+
+            # Log Gradients with TensorBoard
+            if step % 50 == 0 and step > 0:
+                #summary_writer = getSummaryWriter()
+                #for name, param in model.named_parameters():
+                #    if param.grad is not None:
+                #        summary_writer.add_histogram(f"Gradients/{name}", param.grad, step)
+
+                summary_writer = getSummaryWriter()
+                for name, param in model.named_parameters():
+                    if param.grad is not None:
+                        grad = param.grad
+
+                        # Check for NaN or Inf
+                        if torch.isnan(grad).any(): # or torch.isinf(grad).any():
+                            print(f"Warning: {name} has invalid values in its gradient!")
+                        # Log only if the gradient is finite
+                        else: # if torch.isfinite(grad).all():
+                            summary_writer.add_histogram(f"Gradients/{name}", grad, step)
+
             optimizer.zero_grad(set_to_none=True)
             if step % EMA_INTERVAL == 0:
                 ema_handle.update()
@@ -518,6 +541,18 @@ def main_worker(config: Dict[str, Any], args: argparse.Namespace):
                     except Exception as e:
                         print("Not logging loss because of:", e)
                         pass
+
+                    # Log Metrics with TensorBoard
+                    summary_writer = getSummaryWriter()
+                    for key, value in track_losses.items():
+                        summary_writer.add_scalar(f"Train/{key}", value, step)
+                    summary_writer.add_scalar(f"Train/lr", scheduler_lr.get()[-1], step)
+                    summary_writer.add_scalar(f"Train/wd", scheduler_wd.get()[-2], step)
+                    summary_writer.add_scalar(f"Train/scale_f16", scaler.get_scale(), step)
+
+                    # Log Parameters with TensorBoard
+                    for name, param in model.named_parameters():
+                        summary_writer.add_histogram(f"Parameters/{name}", param, step)
 
             if step % 100 == 0 and is_main_process():
                 log_loss_dict = {f"Train/{k}": v for k, v in track_losses.items()}
@@ -548,14 +583,14 @@ def main_worker(config: Dict[str, Any], args: argparse.Namespace):
                     print(f"Elapsed: {format_seconds(int(time() - start_validation))}")
 
                     # SAVE MODEL PARAMETERS
-                    current_error = metrics["IBims"]["arel"]
-                    if last_error == None or current_error <= last_error:
-                        if model_best and os.path.exists(model_best):
-                            os.remove(model_best)
-                        last_error = current_error
-                        model_best = os.path.join(models_folder, f'unidepth_best_{dt.now().strftime("%Y-%m-%d_%H-%M-%S")}.pth')
-                        torch.save(ddp_model.state_dict(), model_best)
-                        print(f"Saving best model: {model_best}")
+                    # current_error = metrics["IBims"]["arel"]
+                    #if last_error == None or current_error <= last_error:
+                    #    if model_best and os.path.exists(model_best):
+                    #        os.remove(model_best)
+                    #    last_error = current_error
+                    #    model_best = os.path.join(models_folder, f'unidepth_best_{dt.now().strftime("%Y-%m-%d_%H-%M-%S")}.pth')
+                    #    torch.save(ddp_model.state_dict(), model_best)
+                    #    print(f"Saving best model: {model_best}")
                     if model_checkpoint and os.path.exists(model_checkpoint):
                         os.remove(model_checkpoint)
                     model_checkpoint = os.path.join(models_folder, f'unidepth_checkpoint_{dt.now().strftime("%Y-%m-%d_%H-%M-%S")}.pth')
