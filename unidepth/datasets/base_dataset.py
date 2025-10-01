@@ -36,6 +36,7 @@ class BaseDataset(Dataset):
         super().__init__()
         assert normalize in [None, "imagenet", "openai"]
 
+        self.benchmark = benchmark
         self.split_file = split_file
         self.test_mode = test_mode
         self.data_root = os.environ["DATAROOT"]
