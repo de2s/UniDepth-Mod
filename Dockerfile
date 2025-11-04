@@ -8,7 +8,7 @@ ARG USER_GID=1000
 
 # Install OS requirements
 RUN apt update \
-    && DEBIAN_FRONTEND=noninteractive apt install python3-opencv git graphviz -y
+    && DEBIAN_FRONTEND=noninteractive apt install -y sudo git python3-opencv
 
 # Install Python requirements
 WORKDIR /unidepth
@@ -27,6 +27,7 @@ RUN pip install -e .
 RUN groupadd --gid ${USER_GID} ${USERNAME} \
     && useradd --uid ${USER_UID} --gid ${USER_GID} -m ${USERNAME} \
     && chown -R ${USERNAME}:${USERNAME} /unidepth
+RUN echo "${USERNAME} ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
 # Switch to non root user
 USER ${USERNAME}
