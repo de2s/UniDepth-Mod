@@ -8,6 +8,8 @@ from typing import Tuple
 import torch
 from torch.nn import functional as F
 
+from e3nn.o3 import xyz_to_angles, angles_to_matrix
+
 
 @torch.jit.script
 def generate_rays(
@@ -82,7 +84,7 @@ def invert_matrix(T):
     if num_dimmensions == 2:
         value = value.squeeze(0)
     return value
-    
+
 @torch.jit.script
 def spherical_zbuffer_to_euclidean(spherical_tensor: torch.Tensor) -> torch.Tensor:
     theta = spherical_tensor[..., 0]  # Extract polar angle
@@ -330,3 +332,98 @@ def iou(mask1: torch.Tensor, mask2: torch.Tensor) -> torch.Tensor:
     iou = intersection / union.clip(min=1.0)
 
     return iou
+
+
+# Our own version of `e3nn.o3.matrix_to_angles(R)` to avoid max tolerance errors
+def matrix_to_angles(R):
+
+    assert torch.allclose(torch.det(R), R.new_tensor(1), rtol=1e-02, atol=1e-06), "Invalid Rotation Matrix"
+    x = R @ R.new_tensor([0.0, 1.0, 0.0])
+    a, b = xyz_to_angles(x)
+    R = angles_to_matrix(a, b, torch.zeros_like(a)).transpose(-1, -2) @ R
+    c = torch.atan2(R[..., 0, 2], R[..., 0, 0])
+    return a, b, c
+
+
+def gather_nearest_patch_center_samples(depth, rays, points, mask, patch_size):
+        
+        B, _, H, W = rays.shape
+        num_patches_y, num_patches_x = H // patch_size, W // patch_size
+
+        # Extract patches
+        depth_patches = F.unfold(depth, kernel_size=patch_size, stride=patch_size)
+        ray_patches = F.unfold(rays, kernel_size=patch_size, stride=patch_size)
+        point_patches = F.unfold(points, kernel_size=patch_size, stride=patch_size) 
+        mask_patches = F.unfold(mask.float(), kernel_size=patch_size, stride=patch_size)
+
+        depth_patches = depth_patches.view(B, 1, patch_size * patch_size, num_patches_y * num_patches_x)
+        ray_patches = ray_patches.view(B, 3, patch_size * patch_size, num_patches_y * num_patches_x)
+        point_patches = point_patches.view(B, 3, patch_size * patch_size, num_patches_y * num_patches_x) 
+        mask_patches = mask_patches.view(B, 1, patch_size * patch_size, num_patches_y * num_patches_x)
+
+        # Pixel-center coordinates
+        y, x = torch.meshgrid(
+            torch.arange(patch_size, device=rays.device),
+            torch.arange(patch_size, device=rays.device),
+            indexing="ij"
+        )
+        coords = torch.stack([y + 0.5, x + 0.5], dim=-1).reshape(-1, 2).float()
+        center = torch.tensor([patch_size / 2, patch_size / 2], device=rays.device).view(1, 2)
+
+        # Distance to patch center
+        dists = torch.norm(coords - center, dim=-1)
+        sorted_indices = torch.argsort(dists)
+
+        # Sort by distance
+        depth_sorted = depth_patches[:, :, sorted_indices, :]
+        rays_sorted = ray_patches[:, :, sorted_indices, :]
+        points_sorted = point_patches[:, :, sorted_indices, :]  
+        mask_sorted = mask_patches[:, :, sorted_indices, :]
+
+        valid = mask_sorted.bool()
+        patch_has_valid = valid.any(dim=2, keepdim=True)
+
+        # Safe argmax to select nearest valid values
+        valid_safe = valid
+        nearest_idx = valid_safe.float().argmax(dim=2, keepdim=True)
+
+        # Gather depths
+        choosen_depths = depth_sorted.gather(2, nearest_idx).squeeze(2)
+        choosen_depths = choosen_depths.view(B, 1, num_patches_y, num_patches_x)
+
+        # Gather rays
+        chosen_rays = rays_sorted.gather(2, nearest_idx.expand(-1, 3, -1, -1)).squeeze(2)
+        chosen_rays = chosen_rays.view(B, 3, num_patches_y, num_patches_x)
+
+        # Gather rays
+        chosen_points = points_sorted.gather(2, nearest_idx.expand(-1, 3, -1, -1)).squeeze(2)
+        chosen_points = chosen_points.view(B, 3, num_patches_y, num_patches_x)
+
+        # Return a new mask for patches
+        new_mask = patch_has_valid.view(B, 1, num_patches_y, num_patches_x)
+
+        # Map nearest point back to original resolution
+        # Create empty mask
+        chosen_points_mask = torch.zeros_like(mask, dtype=torch.bool)
+
+        # Compute patch offsets
+        patch_y = torch.arange(num_patches_y, device=rays.device) * patch_size
+        patch_x = torch.arange(num_patches_x, device=rays.device) * patch_size
+        patch_y_grid, patch_x_grid = torch.meshgrid(patch_y, patch_x, indexing="ij")
+        nearest_idx_flat = nearest_idx.squeeze(1).view(B, num_patches_y, num_patches_x)
+
+        # Convert to patch-local coordinates
+        y_coords = nearest_idx_flat // patch_size
+        x_coords = nearest_idx_flat % patch_size
+
+        # Add patch offsets (broadcasting works)
+        y_coords = y_coords + patch_y_grid.unsqueeze(0)
+        x_coords = x_coords + patch_x_grid.unsqueeze(0)
+
+        # Create batch indices
+        batch_idx = torch.arange(B, device=rays.device).view(B, 1, 1).expand(-1, num_patches_y, num_patches_x)
+
+        # Assign True at the selected positions
+        chosen_points_mask[batch_idx, 0, y_coords, x_coords] = True
+
+        return choosen_depths, chosen_rays, chosen_points, new_mask, chosen_points_mask

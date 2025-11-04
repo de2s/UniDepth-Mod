@@ -5,13 +5,15 @@ import torch.nn as nn
 import torch.nn.functional as F
 from typing import Tuple
 from einops import rearrange
-from e3nn.o3 import Irreps, matrix_to_angles
+
+from unidepth.utils.geometric import generate_rays, invert_matrix, matrix_to_angles, gather_nearest_patch_center_samples
+
 
 from unidepth.utils.geometric import generate_rays, invert_matrix
 from unidepth.utils.visualization import save_tensors
+from unidepth.ops.metrics import bbox_intersections, voxelized_intersections
 
 from .utils import FNS, masked_mean
-
 
 class SelfDistill(nn.Module):
     def __init__(self, weight: float, output_fn: str = "sqrt", eps: float = 1e-5):
@@ -156,13 +158,13 @@ class GeneratorSO3(nn.Module):
 
     def getTransformation(self, pose1: torch.Tensor, pose2: torch.Tensor):
 
-        # Compute relative position
-        R1, R2 = pose1[:3, :3], pose2[:3, :3]
-        Rrel = R1.T @ R2
-        alpha, beta, gamma = matrix_to_angles(Rrel.cpu())
+        # Compute relative pose
+        pose0_inv = invert_matrix(pose0)
+        pose_rel = pose0_inv @ pose1
+        alpha, beta, gamma = matrix_to_angles(pose_rel[:3, :3])
 
         # Compute the block-diagonal rotation matrix in the irreps space
-        R = self.irreps.D_from_angles(alpha, beta, gamma).to(Rrel.device)
+        R = self.irreps.D_from_angles(alpha, beta, gamma)
         return R
 
 class GeneratorSOn(nn.Module):
@@ -184,7 +186,7 @@ class GeneratorSOn(nn.Module):
         # x, y, z = pose_rel[0, 3].item(), pose_rel[1, 3].item(), pose_rel[2, 3].item()
 
         # Compute input angles
-        alpha, beta, gamma = matrix_to_angles(pose_rel[:3, :3].cpu())
+        alpha, beta, gamma = matrix_to_angles(pose_rel[:3, :3])
         input_angles = torch.tensor([alpha, beta, gamma], device=pose_rel.device)
         generator_angles = self.rotation_decoder(input_angles)
 
@@ -199,7 +201,7 @@ class GeneratorSOn(nn.Module):
         rows, cols = torch.triu_indices(self.feature_dim, self.feature_dim, offset=1)
         generator_matrix[rows, cols] = generator_angles
         generator_matrix[cols, rows] = -generator_angles
-        
+
         # Generate rotation matrix
         rotation_matrix = torch.matrix_exp(generator_matrix)
         return rotation_matrix
@@ -271,8 +273,7 @@ class EqSelfDistill(nn.Module):
             self.transform_generator = GeneratorSO3(representation_type)
         elif self.symmetry_group == "SO(n)":
             self.transform_generator = GeneratorSOn(self.feature_dim)
-        
-        
+
     @torch.autocast(device_type="cuda", enabled=False, dtype=torch.float32)
     def forward(
         self,
@@ -288,26 +289,10 @@ class EqSelfDistill(nn.Module):
         patch_size=14,
     ) -> Tuple[torch.Tensor, dict]:
 
-        # Initialize mertrics
-        num_points = []
-        num_matched_points = []
-
-        # Create change of basis matrixes
-        change_base = torch.matrix_exp(self.change_base_generator)
-        change_base_inv = torch.matrix_exp(-self.change_base_generator)
-
         # Choose between ground truth or estimated data
         depth = depth if self.use_gt else estimated_depth
+        mask = mask if self.use_gt else torch.ones_like(mask, dtype=torch.bool)
         K = intrinsics if self.use_gt else estimated_intrinsics
-  
-        # Generate rays  
-        *_, H, W = feature.shape    
-        K[:, 0, 0] /= patch_size  # fx
-        K[:, 1, 1] /= patch_size  # fy
-        K[:, 0, 2] /= patch_size  # cx
-        K[:, 1, 2] /= patch_size  # cy
-
-        rays, _ = generate_rays(K, (H, W))
 
         # Calculate number of patches
         B, _, H, W = depth.shape
@@ -315,56 +300,74 @@ class EqSelfDistill(nn.Module):
         assert W % patch_size == 0 and H % patch_size == 0
         num_patches_x, num_patches_y = W // patch_size, H // patch_size
 
-        # Create grid with the pixel coordinates of the patch centers
-        centers_x = (torch.arange(num_patches_x, dtype=torch.float32, device=device) + 0.5) * patch_size
-        centers_y = (torch.arange(num_patches_y, dtype=torch.float32, device=device) + 0.5) * patch_size
-        centers = torch.stack(torch.meshgrid(centers_y, centers_x, indexing="ij"), dim=-1).unsqueeze(0).repeat(B, 1, 1, 1)
-
-        # Create grid with shape (1, num_patches_y, num_patches_x, 2) with values normalized to [-1, 1]
-        norm_centers_x = 2.0 * centers_x / (W - 1) - 1.0
-        norm_centers_y = 2.0 * centers_y / (H - 1) - 1.0
-        grid = torch.stack(torch.meshgrid(norm_centers_x, norm_centers_y, indexing="xy"), dim=-1).unsqueeze(0).repeat(B, 1, 1, 1)
-        # Resample depth and mask
-        original_depth = depth
-        original_mask = mask
-        depth = F.grid_sample(depth, grid, mode="nearest", align_corners=True)
-        mask = F.grid_sample(mask.float(), grid, mode="nearest", align_corners=True).bool()
-        
-        # Flatten tensors                                           
-        depth = rearrange(depth, "b c h w -> b (h w) c")
-        mask = rearrange(mask, "b c h w -> b (h w) c")
-        feature = rearrange(feature, "b c h w -> b (h w) c")
-        centers = rearrange(centers, "b h w c -> b (h w) c")
+        # Generate rays     
+        rays_flat, _ = generate_rays(K, (H, W))
 
         # Retroproject points
-        points = torch.stack([
-            rays[..., 0] * depth[..., 0] / rays[..., 2],
-            rays[..., 1] * depth[..., 0] / rays[..., 2],
-            depth[..., 0]
+        depth_flat = rearrange(depth, "b c h w -> b (h w) c")
+        points_flat = torch.stack([
+            rays_flat[..., 0] * depth_flat[..., 0] / rays_flat[..., 2],
+            rays_flat[..., 1] * depth_flat[..., 0] / rays_flat[..., 2],
+            depth_flat[..., 0]
         ], dim=-1)
+        mask_flat = rearrange(mask, "b c h w -> b (h w) c")
         
         # Transform to global coordinates
-        B, N, _ = points.shape
-        ones = torch.ones(B, N, 1, device=points.device)
-        points = torch.cat([points, ones], dim=-1)
-        points = torch.bmm(extrinsics, points.transpose(-2, -1))
-        points = points.permute(0, 2, 1)[:, :, :3]   # Drop the homogeneous coordinate
+        B, N, _ = points_flat.shape
+        ones = torch.ones(B, N, 1, device=points_flat.device)
+        points_flat = torch.cat([points_flat, ones], dim=-1)
+        points_flat = torch.bmm(extrinsics, points_flat.transpose(-2, -1))
+        points_flat = points_flat.permute(0, 2, 1)[:, :, :3]   # Drop the homogeneous coordinate
+        
+        # Calculate intersection over union metrics
+        box_ious, box_ioas, box_iobs = [], [], []
+        vox_ious, vox_ioas, vox_iobs = [], [], []
+        for i in range(B // 2):
+            left, right = 2 * i, 2 * i + 1
+            mask0_flat, mask1_flat = mask_flat[left], mask_flat[right]
+            points0_flat, points1_flat = points_flat[left][mask0_flat.squeeze(-1)], points_flat[right][mask1_flat.squeeze(-1)]
+            box_iou, box_ioa, box_iob = bbox_intersections(points0_flat, points1_flat)
+            box_ious.append(box_iou); box_ioas.append(box_ioa); box_iobs.append(box_iob)
+            vox_iou, vox_ioa, vox_iob = voxelized_intersections(points0_flat, points1_flat, factor=0.1)
+            vox_ious.append(vox_iou); vox_ioas.append(vox_ioa); vox_iobs.append(vox_iob)
+        box_ious = torch.cat([t.unsqueeze(0) for t in box_ious], dim=0); box_ioas = torch.cat([t.unsqueeze(0) for t in box_ioas], dim=0); box_iobs = torch.cat([t.unsqueeze(0) for t in box_iobs], dim=0)
+        vox_ious = torch.cat([t.unsqueeze(0) for t in vox_ious], dim=0); vox_ioas = torch.cat([t.unsqueeze(0) for t in vox_ioas], dim=0); vox_iobs = torch.cat([t.unsqueeze(0) for t in vox_iobs], dim=0)
+        print(f"IOU: {vox_ious}")
+
+        # Choose the ray closest to the patch center
+        rays = rearrange(rays_flat, "b (h w) c -> b c h w", h=H, w=W)
+        points = rearrange(points_flat, "b (h w) c -> b c h w", h=H, w=W) 
+        depth, rays, points, mask, chosen_mask = gather_nearest_patch_center_samples(depth, rays, points, mask, patch_size)        
+
+        # Flatten tensors                                     
+        # depth_flat = rearrange(depth, "b c h w -> b (h w) c")
+        # rays_flat = rearrange(rays, "b c h w -> b (h w) c")
+        points_flat = rearrange(points, "b c h w -> b (h w) c")
+        mask_flat = rearrange(mask, "b c h w -> b (h w) c")
+        features_flat = rearrange(feature, "b c h w -> b (h w) c")
+        
+        # Create change of basis matrixes
+        change_base = torch.matrix_exp(self.change_base_generator)
+        change_base_inv = torch.matrix_exp(-self.change_base_generator)
 
         # Iterate samples
         features0, features1 = [], []
         for i in range(B // 2):
             left, right = 2 * i, 2 * i + 1
-            image0, image1 = (image[left], image[right]) if image else (None, None)
-            points0, points1 = points[left], points[right]
-            feature0, feature1 = feature[left], feature[right]
-            centers0, centers1 = centers[left], centers[right]
+            image0, image1 = (image[left], image[right]) if image is not None else (None, None)
+            points0, points1 = points_flat[left], points_flat[right]
+            feature0, feature1 = features_flat[left], features_flat[right]
             extrinsics0, extrinsics1 = extrinsics[left], extrinsics[right]
-            mask0, mask1 = mask[left], mask[right]
-            original_mask0, original_mask1 = original_mask[left], original_mask[right]
+            mask0, mask1 = mask_flat[left], mask_flat[right]
             flip0, flip1 = flips[left], flips[right]
 
-            # Check that both images were rotated
+            # Check that both images were rotated together
             assert flip0 == flip1
+
+            # Skip pair if cloud points doesn't intersect
+            if vox_ious[i] < 0.2:
+                print(f"Warning: Skip pair of frames because IoU is too low: {vox_ious[i]}")
+                continue
 
             if self.use_gt:
                 mask0, mask1 = mask0.squeeze(), mask1.squeeze()
@@ -372,11 +375,6 @@ class EqSelfDistill(nn.Module):
                 points1 = points1[mask1]
                 feature0 = feature0[mask0]
                 feature1 = feature1[mask1]
-                centers0 = centers0[mask0]
-                centers1 = centers1[mask1]
-
-            # Track number of points    
-            num_points.append(len(points0) + len(points1) / 2)
 
             # Calculate matrix of distances between 3D points
             distances = torch.cdist(points0, points1, p=2)
@@ -388,43 +386,23 @@ class EqSelfDistill(nn.Module):
             B = torch.ones(points1.shape[0], device=points1.device)
             A /= A.sum()
             B /= B.sum()            
-            # plan = ot.sinkhorn_unbalanced(a, b, C, reg, reg_m, method='sinkhorn', reg_type='kl', numItermax=1000, stopThr=1e-6, verbose=False)!
+            # defaults: method='sinkhorn', reg_type='kl', numItermax=1000, stopThr=1e-6, verbose=False
             plan = ot.unbalanced.sinkhorn_unbalanced(A, B, distances, reg, reg_m) # TODO: CHECK DISTANCE SQUARED
             
-
             # Calculate costs using unbalanced optimal transport
             matches_a = torch.argmax(plan, dim=1)  # For each A[i], best B[j]
             matches_b = torch.argmax(plan, dim=0)  # For each B[i], best A[j]
 
-            # Calculate common matches
-            matches0, matches1 = [], []
-            for i in range(len(matches_a)):
-                if i == matches_b[matches_a[i]].item():
-                    #common_matches.append((i, matches_a[i].item()))
-                    matches0.append(i)
-                    matches1.append(matches_a[i].item())
+            # Get mutual matches
+            matches_a_indices = torch.arange(matches_a.size(0), device=device)
+            mutual_mask = matches_b[matches_a] == matches_a_indices  # only keep if mutual
+            matches = torch.stack([matches_a_indices[mutual_mask], matches_a[mutual_mask]], dim=1)
 
-            # OPTIONALLY PLOT IMAGES
-            SAVE_TENSORS = False # Change this value in the debugger to make sure this method is called on demand
-            if(SAVE_TENSORS):
-                save_tensors(
-                    "named_tensors.pt",
-                    image0=image0, image1=image1, 
-                    original_mask0=original_mask0, original_mask1=original_mask1, 
-                    feature0=feature0, feature1=feature1, 
-                    centers0=centers0, centers1=centers1, 
-                    points0=points0, points1=points1, 
-                    distances=distances, 
-                    plan=plan, 
-                    matches_a=matches_a, matches_b=matches_b
-                )
-
-            # Track number of matched points
-            num_matched_points.append(len(feature0))
+            # TODO: SKIP IF THERE IS NOT ENOUGH MATCHES.
 
             # Filter out not matched points
-            feature0 = feature0[matches0]
-            feature1 = feature1[matches1]
+            feature0 = feature0[matches[:, 0]]
+            feature1 = feature1[matches[:, 1]]
 
             # Change of base for the feature vectors
             feature0_transformed = torch.matmul(change_base, feature0.T).T
@@ -448,20 +426,19 @@ class EqSelfDistill(nn.Module):
             features1.append(feature0)
 
         # Compute aggregated loss
-        features0 = torch.cat(features0, dim=0) # TODO: VALIDATE IF I CAN MERGE ALL SIMILARITIES, I THINK IT'S OK
-        features1 = torch.cat(features1, dim=0)
-        loss = self.loss(features0, features1.detach())
+        if len(features0) > 0 and len(features1) > 0:
+            features0 = torch.cat(features0, dim=0)
+            features1 = torch.cat(features1, dim=0)
+            loss = self.loss(features0, features1.detach())
+        else:
+            # If Does not contribute to gradients if image pair is skipped
+            print("Warning: Empty loss")
+            # HACK: Create a zero that stays in the computational graph to avoid exceptions
+            dummy = 0.0
+            for p in self.parameters():
+                dummy = dummy + (p.sum() * 0.0)
+            loss = dummy
 
-        # Calculate and aggregate metrics
-        num_points = torch.tensor(num_points, device=features0.device)
-        num_matched_points = torch.tensor(num_matched_points, device=features0.device)
-        avg_num_points = num_points.mean()
-        matched_points_ratio  = (num_matched_points / num_points).mean()
-        metrics = {
-            "NumPoints": avg_num_points,
-            "MatchedPointsRatio": matched_points_ratio
-        }
- 
         return loss, metrics
     
     def loss(
