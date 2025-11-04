@@ -1,3 +1,3 @@
 #! /bin/bash
 
-tensorboard --logdir=/data/runs
+tensorboard --logdir=/data/tensorboard/runs

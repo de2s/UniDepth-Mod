@@ -16,6 +16,7 @@ import torch
 import torch.nn as nn
 import torch.utils.data.distributed
 import wandb
+from aim import Distribution
 from torch import distributed as dist
 from torch import optim
 from torch.nn.parallel.distributed import DistributedDataParallel
@@ -37,7 +38,8 @@ from unidepth.utils.ema_torch import (DummyExponentialMovingAverage,
                                       ExponentialMovingAverage)
 from unidepth.utils.misc import calculate_mean_values, format_seconds, profile_method, profile_context
 from unidepth.utils.validation import validate
-from unidepth.utils import getSummaryWriter
+from unidepth.utils import getAimRun
+
 
 
 EMA_INTERVAL = 10
@@ -210,6 +212,8 @@ def main_worker(config: Dict[str, Any], args: argparse.Namespace):
                 * config["data"]["num_copies"]
                 * config["data"]["num_frames"]
             )
+
+        # Initialize Weights & Biases logger
         wandb.init(
             project="UniDepth",
             name=run_id,
@@ -220,6 +224,10 @@ def main_worker(config: Dict[str, Any], args: argparse.Namespace):
             mode="disabled" if "DEBUG" in os.environ else None,
         )
         wandb.watch(model)
+
+        # Initialize Aim logger and save unidepth run configuration
+        run = getAimRun()
+        run['hparams'] = config
 
     ##############################
     ########## DATASET ###########
@@ -415,7 +423,7 @@ def main_worker(config: Dict[str, Any], args: argparse.Namespace):
         for j, batches in enumerate(train_loader):
 
             # Print batch number
-            print(f"Batch: {j}")
+            print(f"Iteration: {step}")
 
             system_memory = (
                 0.99 * system_memory
@@ -496,24 +504,20 @@ def main_worker(config: Dict[str, Any], args: argparse.Namespace):
             scheduler_lr.step()
             scheduler_betas.step()
 
-            # Log Gradients with TensorBoard
-            if step % 50 == 0 and step > 0:
-                #summary_writer = getSummaryWriter()
-                #for name, param in model.named_parameters():
-                #    if param.grad is not None:
-                #        summary_writer.add_histogram(f"Gradients/{name}", param.grad, step)
-
-                summary_writer = getSummaryWriter()
+            # Log gradients before they are deleted
+            if step % config["training"]["log_train_metrics_interval"] == 0 and is_main_process():
                 for name, param in model.named_parameters():
                     if param.grad is not None:
                         grad = param.grad
-
-                        # Check for NaN or Inf
-                        if torch.isnan(grad).any(): # or torch.isinf(grad).any():
+                        # Check for NaN or Inf, log only if the gradient is finite
+                        if torch.isnan(grad).any(): # or 
                             print(f"Warning: {name} has invalid values in its gradient!")
-                        # Log only if the gradient is finite
-                        else: # if torch.isfinite(grad).all():
-                            summary_writer.add_histogram(f"Gradients/{name}", grad, step)
+                        elif torch.isinf(grad).any():
+                            print(f"Warning: {name} has infinite values in its gradient!")
+                        else:
+                            # Log with AIM
+                            run = getAimRun()
+                            run.track(Distribution(grad.detach().cpu().numpy()), name=f"gradients/{name}", context={"subset": "train"}, step=step)
 
             optimizer.zero_grad(set_to_none=True)
             if step % EMA_INTERVAL == 0:
@@ -525,7 +529,9 @@ def main_worker(config: Dict[str, Any], args: argparse.Namespace):
             step += 1
 
             # LOGGING
-            if step % 50 == 0:
+
+            # Log train metrics
+            if step % config["training"]["log_train_metrics_interval"] == 0:
                 track_losses = aggregate_sync_losses(track_losses, device=model.device)
                 if is_main_process():
                     try:
@@ -542,17 +548,22 @@ def main_worker(config: Dict[str, Any], args: argparse.Namespace):
                         print("Not logging loss because of:", e)
                         pass
 
-                    # Log Metrics with TensorBoard
-                    summary_writer = getSummaryWriter()
-                    for key, value in track_losses.items():
-                        summary_writer.add_scalar(f"Train/{key}", value, step)
-                    summary_writer.add_scalar(f"Train/lr", scheduler_lr.get()[-1], step)
-                    summary_writer.add_scalar(f"Train/wd", scheduler_wd.get()[-2], step)
-                    summary_writer.add_scalar(f"Train/scale_f16", scaler.get_scale(), step)
+                    # Log metrics with Aim
+                    run = getAimRun()
+                    run.track(
+                        {
+                            **{f"train/losses/{k}": v for k, v in track_losses.items()},
+                            **{f"train/lr": scheduler_lr.get()[-1]},
+                            **{f"train/wd": scheduler_wd.get()[-2]},
+                            **{f"train/scale_f16": scaler.get_scale()},
+                        },
+                        context={"subset": "train"}, 
+                        step=step
+                    )
 
-                    # Log Parameters with TensorBoard
+                    # Log Parameters with Aim
                     for name, param in model.named_parameters():
-                        summary_writer.add_histogram(f"Parameters/{name}", param, step)
+                        run.track(Distribution(param.detach().cpu().numpy()), name=f"parameters/{name}", context={"subset": "train"}, step=step)
 
             if step % 100 == 0 and is_main_process():
                 log_loss_dict = {f"Train/{k}": v for k, v in track_losses.items()}

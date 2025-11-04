@@ -1,3 +1,4 @@
+from aim import Run
 
 from datetime import datetime
 
@@ -5,13 +6,21 @@ import torch
 import matplotlib.cm as cm
 from torch.utils.tensorboard import SummaryWriter
 
-# Singleton factory for Logger
+# Logger singleton instance
+_aim_run = None
 _summary_writer_instance = None
+
+def getAimRun():
+    global _aim_run
+    if _aim_run is None:
+        _aim_run = Run(experiment="unidepth", repo="/data/aim")
+        _aim_run.set_artifacts_uri("file:///data/aim/artifacts")
+    return _aim_run
 
 def getSummaryWriter():
     global _summary_writer_instance
     if _summary_writer_instance is None:
-        log_dir = f"/data/runs/unidepth_{datetime.now():%Y-%m-%d_%H-%M-%S}"
+        log_dir = f"/data/tensorboard/runs/unidepth_{datetime.now():%Y-%m-%d_%H-%M-%S}"
         _summary_writer_instance = SummaryWriter(log_dir)
     return _summary_writer_instance
 
