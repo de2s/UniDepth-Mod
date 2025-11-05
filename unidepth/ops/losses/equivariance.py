@@ -115,7 +115,7 @@ class EqSelfDistill(nn.Module):
             metrics["BoxIntersectionOverUnionSample"] = box_ious[0]
             metrics["VoxIntersectionOverUnionSample"] = vox_ious[0]
             save_point_cloud(
-                f"train_point_cloud_{step:06d}",
+                f"artifacts/train/point_cloud_{step:06d}",
                 torch.cat([points3d_flat[0], points3d_flat[1]], dim=0),
                 torch.cat([
                     torch.tensor([0, 255, 0], dtype=torch.uint8).repeat(points3d_flat[0].shape[0], 1),

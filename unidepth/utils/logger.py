@@ -153,7 +153,7 @@ def save_point_cloud(tag, points, colors):
 
     # Log artifact
     run = getAimRun()
-    run.log_artifact(path, name="artifacts/train/point_clouds")
+    run.log_artifact(path, name=tag)
 
     # Delete file
     os.remove(path)
