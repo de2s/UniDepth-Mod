@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from typing import Tuple
 from einops import rearrange
-
+from aim import Image, Distribution
 from unidepth.utils.geometric import generate_rays, invert_matrix, matrix_to_angles, gather_nearest_patch_center_samples
 from unidepth.utils.logger import getAimRun, log_equivariant_loss_artifacts, save_point_cloud
 from unidepth.ops.metrics import bbox_intersections, voxelized_intersections
@@ -329,7 +329,9 @@ class GeneratorSO3(nn.Module):
                 context={"subset": "train"},
                 step=step
             )
-
+            run.track(Image(R), name="train/equivariance/rotation_matrix", context={"subset": "train"}, step=step)
+            run.track(Distribution(R), name=f"train/equivariance/rotation_matrix_distribution", context={"subset": "train"}, step=step)
+            
         return R
 
 
@@ -383,6 +385,9 @@ class GeneratorSOn(nn.Module):
                 context={"subset": "train"},
                 step=step
             )
+            run.track(Distribution(generator_matrix), name=f"train/equivariance/generator_matrix_distribution", context={"subset": "train"}, step=step)
+            run.track(Distribution(rotation_matrix), name=f"train/equivariance/rotation_matrix_distribution", context={"subset": "train"}, step=step)
+            run.track(Image(rotation_matrix), name="train/equivariance/rotation_matrix", context={"subset": "train"}, step=step)
 
         return rotation_matrix
 
