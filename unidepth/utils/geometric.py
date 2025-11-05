@@ -384,8 +384,7 @@ def gather_nearest_patch_center_samples(depth, rays, points, mask, patch_size):
         patch_has_valid = valid.any(dim=2, keepdim=True)
 
         # Safe argmax to select nearest valid values
-        valid_safe = valid
-        nearest_idx = valid_safe.float().argmax(dim=2, keepdim=True)
+        nearest_idx = valid.float().argmax(dim=2, keepdim=True)
 
         # Gather depths
         choosen_depths = depth_sorted.gather(2, nearest_idx).squeeze(2)
@@ -400,17 +399,13 @@ def gather_nearest_patch_center_samples(depth, rays, points, mask, patch_size):
         chosen_points = chosen_points.view(B, 3, num_patches_y, num_patches_x)
 
         # Return a new mask for patches
-        new_mask = patch_has_valid.view(B, 1, num_patches_y, num_patches_x)
-
-        # Map nearest point back to original resolution
-        # Create empty mask
-        chosen_points_mask = torch.zeros_like(mask, dtype=torch.bool)
+        patches_mask = patch_has_valid.view(B, 1, num_patches_y, num_patches_x)
 
         # Compute patch offsets
         patch_y = torch.arange(num_patches_y, device=rays.device) * patch_size
         patch_x = torch.arange(num_patches_x, device=rays.device) * patch_size
         patch_y_grid, patch_x_grid = torch.meshgrid(patch_y, patch_x, indexing="ij")
-        nearest_idx_flat = nearest_idx.squeeze(1).view(B, num_patches_y, num_patches_x)
+        nearest_idx_flat = nearest_idx.view(B, num_patches_y, num_patches_x)
 
         # Convert to patch-local coordinates
         y_coords = nearest_idx_flat // patch_size
@@ -419,11 +414,6 @@ def gather_nearest_patch_center_samples(depth, rays, points, mask, patch_size):
         # Add patch offsets (broadcasting works)
         y_coords = y_coords + patch_y_grid.unsqueeze(0)
         x_coords = x_coords + patch_x_grid.unsqueeze(0)
+        selected_points = torch.stack((x_coords, y_coords), dim=1)
 
-        # Create batch indices
-        batch_idx = torch.arange(B, device=rays.device).view(B, 1, 1).expand(-1, num_patches_y, num_patches_x)
-
-        # Assign True at the selected positions
-        chosen_points_mask[batch_idx, 0, y_coords, x_coords] = True
-
-        return choosen_depths, chosen_rays, chosen_points, new_mask, chosen_points_mask
+        return choosen_depths, chosen_rays, chosen_points, patches_mask, selected_points

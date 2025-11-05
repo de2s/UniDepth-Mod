@@ -14,6 +14,14 @@ from PIL import Image
 from unidepth.utils.misc import ssi_helper
 
 
+def rescale(image, vmin=None, vmax=None):
+    if vmin == None and vmax == None:
+        vmin = image.min()
+        vmax = image.max()
+    normalized = (image - vmin) / (vmax - vmin + 1e-8)
+    return normalized
+
+
 def colorize(
     value: np.ndarray, vmin: float = None, vmax: float = None, cmap: str = "magma_r"
 ):
@@ -199,7 +207,4 @@ def log_train_artifacts(rgbs, gts, preds, ds_name, step, infos={}):
             os.path.join(os.environ["HOME"], "Workspace", f"art_grid{step}.png")
         )
         print("Logging training images failed")
-
-
-def save_tensors(file_path, **tensors):
-    torch.save(tensors, file_path)
+    

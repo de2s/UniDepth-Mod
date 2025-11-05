@@ -1,14 +1,17 @@
-from aim import Run
+import io
+import os
 
-from datetime import datetime
-
+import numpy as np
 import torch
-import matplotlib.cm as cm
-from torch.utils.tensorboard import SummaryWriter
+import matplotlib
+import matplotlib.pyplot as plt
+from aim import Run, Image
+
+# Use non-interactive backend
+matplotlib.use('Agg') 
 
 # Logger singleton instance
 _aim_run = None
-_summary_writer_instance = None
 
 def getAimRun():
     global _aim_run
@@ -17,56 +20,138 @@ def getAimRun():
         _aim_run.set_artifacts_uri("file:///data/aim/artifacts")
     return _aim_run
 
-def getSummaryWriter():
-    global _summary_writer_instance
-    if _summary_writer_instance is None:
-        log_dir = f"/data/tensorboard/runs/unidepth_{datetime.now():%Y-%m-%d_%H-%M-%S}"
-        _summary_writer_instance = SummaryWriter(log_dir)
-    return _summary_writer_instance
+def log_equivariant_loss_artifacts(
+    image0, image1,
+    mask0, mask1, 
+    feature0, feature1, 
+    points2d0, points2d1,
+    matches, 
+    step
+):
+    # Get logger
+    run = getAimRun()
 
+    # Get temp folder
+    temp_folder = os.path.join(os.environ["CACHE"], "temp")
+    file_name = "equivariant_loss_tensors.pth"
+    path = os.path.join(temp_folder, file_name)
 
-# TODO: MOVE THIS FUNCTION TO A SUITABLE FILE FOR VISUALIZATION PURPOSES
+    # Log tensors to a file and save artifact
+    if 'equivariant_loss_tensors' not in run.artifacts:
+        torch.save(
+            {
+                "image0": image0, "image1": image1, 
+                "mask0": mask0, "mask1": mask1,
+                "feature0": feature0, "feature1": feature1, 
+                "points2d0": points2d0, "points2d1": points2d1,
+                "matches": matches,
+            }, 
+            path
+        )
+        run.log_artifact(path, name="equivariant_loss_tensors")
 
-# Cache of LUTs so we don't recompute
-_lut_cache = {}
+    ### PLOT ORIGINAL IMAGES ###
+    
+    # TODO: ORIGINAL IMAGES ARE DRAWN AT PROPPER SCALE
 
-def get_colormap_lut(map_name, num_colors = 256, device = "cuda"):
+    # Permute channels
+    image0 = image0.permute(1, 2, 0)
+    image1 = image1.permute(1, 2, 0)
 
-    key = (map_name, num_colors, device)
-    if key not in _lut_cache:
-        cmap = cm.get_cmap(map_name, num_colors)
-        lut = torch.tensor(cmap.colors[:, :3], dtype=torch.float32, device=device)
-        _lut_cache[key] = lut
-    return _lut_cache[key]
-
-def colorize(images, map_name = "magma_r", num_colors = 256):
-
-    # Standardize input to (N,1,H,W)
-    if images.dim() == 2:
-        images = images.unsqueeze(0).unsqueeze(0)  # (1,1,H,W)
-    elif images.dim() == 3 and images.shape[0] == 1:
-        images = images.unsqueeze(0)  # (1,1,H,W)
-    elif images.dim() == 4 and images.shape[1] == 1:
-        pass  # already batch
+    # Convert dtype to unit8
+    if image0.dtype == torch.uint8 and image1.dtype == torch.uint8:
+        pass
+    elif image0.dtype == torch.float32 and image1.dtype == torch.float32:
+        image0 = ((image0 - image0.min()) / (image0.max() - image0.min()) * 255).to(torch.uint8)
+        image1 = ((image1 - image1.min()) / (image1.max() - image1.min()) * 255).to(torch.uint8)
     else:
-        raise ValueError("Input must be (H,W), (1,H,W), or (N,1,H,W) single-channel images")
+        raise RuntimeError(f"Image type not supported: {image0.dtype}")
 
-    device = images.device
-    lut = get_colormap_lut(map_name, num_colors, device)
+    # Combine images
+    combined = torch.cat([image0, image1], dim=1).cpu().numpy()
+    h, w, _ = combined.shape
+    
+    # Save figure
+    dpi = 100
+    fig = plt.figure(figsize=(w/dpi, h/dpi), dpi=dpi)
+    axe = plt.Axes(fig, [0., 0., 1., 1.])
+    axe.set_axis_off()
+    fig.add_axes(axe)
+    axe.imshow(combined)
+    # Draw patch centers
+    for patch0_center, patch1_center in zip(points2d0[matches[:, 0]].cpu().numpy(), points2d1[matches[:, 1]].cpu().numpy()):
+        axe.plot(patch0_center[1], patch0_center[0], marker="o", color="limegreen", markersize=0.5)
+        axe.plot(patch1_center[1] + mask0.shape[1], patch1_center[0], marker="o", color="limegreen", markersize=0.5)
+    run.track(Image(fig), name="artifacts/train/matched_images", context={"subset": "train"}, step=step)
+    plt.close(fig)
 
-    # normalize each image in the batch individually to [0,1]
-    #min_vals = images.view(images.size(0), -1).min(dim=1)[0].view(-1,1,1,1)
-    #max_vals = images.view(images.size(0), -1).max(dim=1)[0].view(-1,1,1,1)
-    #img_norm = (images - min_vals) / (max_vals - min_vals + 1e-8)
+    ### PLOT MASKS ###
 
-    min = images.min()
-    max = images.max()
-    img_norm = (images - min) / (max - min + 1e-8)
+    # TODO: MASKS ARE NOT BEING DRAWN AT PROPPER SCALE
 
-    # Map to LUT indices
-    idx = (img_norm * (num_colors - 1)).long()  # shape (N,1,H,W)
-    idx = idx.squeeze(1)  # (N,H,W)
+    # Combine masks
+    combined = torch.cat([mask0, mask1], dim=1).cpu().numpy()
+    combined = np.where(combined, 0.5, 1.0)
+    h, w = combined.shape
 
-    # Apply LUT (broadcast over batch)
-    colored = lut[idx]  # (N,H,W,3)
-    return colored.permute(0, 3, 1, 2)  # (N,3,H,W)
+    # Save figure
+    dpi = 100
+    fig = plt.figure(figsize=(w/dpi, h/dpi), dpi=dpi)
+    axe = plt.Axes(fig, [0., 0., 1., 1.])
+    axe.set_axis_off()
+    fig.add_axes(axe)
+    axe.imshow(combined, cmap='gray', vmin=0, vmax=1)
+    plt.axis("off")
+    # Draw patch centers
+    for patch0_center, patch1_center in zip(points2d0[matches[:, 0]].cpu().numpy(), points2d1[matches[:, 1]].cpu().numpy()):
+        axe.plot(patch0_center[1], patch0_center[0], marker="o", color="limegreen", markersize=0.5)
+        axe.plot(patch1_center[1] + mask0.shape[1], patch1_center[0], marker="o", color="limegreen", markersize=0.5)
+    run.track(Image(fig), name="artifacts/train/matched_masks", context={"subset": "train"}, step=step)
+    plt.close(fig)
+
+
+def save_point_cloud(tag, points, colors):
+
+    # Ensure colors are int and in 0-255
+    colors = colors.clamp(0, 255).to(torch.uint8)
+
+    # Create filename
+    filename = f"{tag}.ply"
+
+    # Build body efficiently in memory
+    buf = io.StringIO()
+
+    # Header
+    buf.write("ply\n")
+    buf.write("format ascii 1.0\n")
+    buf.write(f"element vertex {points.shape[0]}\n")
+    buf.write("property float x\n")
+    buf.write("property float y\n")
+    buf.write("property float z\n")
+    buf.write("property uchar red\n")
+    buf.write("property uchar green\n")
+    buf.write("property uchar blue\n")
+    buf.write("end_header\n")
+
+    # Convert to NumPy for efficient vectorized writing
+    pts_np = points.cpu().numpy()
+    cols_np = colors.cpu().numpy()
+
+    # Join all rows into one large string (very fast)
+    data_str = "\n".join(
+        f"{x:.6f} {y:.6f} {z:.6f} {r} {g} {b}"
+        for (x, y, z), (r, g, b) in zip(pts_np, cols_np)
+    )
+    buf.write(data_str)
+    buf.write("\n")
+
+    # Write once to disk
+    with open(filename, "w") as f:
+        f.write(buf.getvalue())
+
+    # Log artifact
+    run = getAimRun()
+    run.log_artifact(filename)
+
+    # Delete file
+    os.remove(filename)

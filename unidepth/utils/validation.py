@@ -5,8 +5,7 @@ from torch.nn import functional as F
 
 from unidepth.utils import barrier, is_main_process
 from unidepth.utils.misc import remove_padding
-
-from unidepth.utils import getSummaryWriter
+from unidepth.utils import getAimRun
 
 
 def original_image(batch, preds=None):
@@ -48,8 +47,8 @@ def original_image(batch, preds=None):
 
 def log_metrics(metrics_all, step):
 
-    # Get logger for TensorBoard
-    summary_writer = getSummaryWriter()
+    # Get logger for Aim
+    run = getAimRun()
 
     for name_ds, metrics in metrics_all.items():
         for metrics_name, metrics_value in metrics.items():
@@ -58,8 +57,8 @@ def log_metrics(metrics_all, step):
                 wandb.log(
                     {f"Metrics/{name_ds}/{metrics_name}": metrics_value}, step=step
                 )
-                # Log with TensorBoard
-                summary_writer.add_scalar(f"Metrics/{name_ds}/{metrics_name}", metrics_value, step)
+                # Log with TensorBoard and Aim
+                run.track(metrics_value, name=f"metrics/{name_ds}/{metrics_name}", context={"subset": "val"}, step=step)
             except:
                 pass
 

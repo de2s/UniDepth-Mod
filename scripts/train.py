@@ -422,6 +422,9 @@ def main_worker(config: Dict[str, Any], args: argparse.Namespace):
     while True:
         for j, batches in enumerate(train_loader):
 
+            # Check if this iteratio should be logged
+            should_log = step % config["training"]["log_train_metrics_interval"] == 0 and is_main_process()
+
             # Print batch number
             print(f"Iteration: {step}")
 
@@ -475,7 +478,7 @@ def main_worker(config: Dict[str, Any], args: argparse.Namespace):
                 ):
                     with context:
                         # with profile_context("ForwardPassContext", verbose=True):
-                        preds, losses, metrics = model(batch["data"], batch["img_metas"], step)
+                        preds, losses, metrics = model(batch["data"], batch["img_metas"], should_log, step)
                     loss = sum(losses["opt"].values()) / nsteps_accumulation_gradient
                     # with profile_context("BackwardPassContext", verbose=True):
                     scaler.scale(loss).backward()
@@ -492,6 +495,9 @@ def main_worker(config: Dict[str, Any], args: argparse.Namespace):
                         for k, v in losses_dict.items()
                     }
                 )
+
+                # Log the first iteration only
+                should_log = False
 
             if clipping is not None:
                 scaler.unscale_(optimizer)

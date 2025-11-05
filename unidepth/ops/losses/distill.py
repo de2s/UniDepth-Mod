@@ -7,10 +7,7 @@ from typing import Tuple
 from einops import rearrange
 
 from unidepth.utils.geometric import generate_rays, invert_matrix, matrix_to_angles, gather_nearest_patch_center_samples
-
-
-from unidepth.utils.geometric import generate_rays, invert_matrix
-from unidepth.utils.visualization import save_tensors
+from unidepth.utils.logger import getAimRun, log_equivariant_loss_artifacts, save_point_cloud
 from unidepth.ops.metrics import bbox_intersections, voxelized_intersections
 
 from .utils import FNS, masked_mean
@@ -156,15 +153,32 @@ class GeneratorSO3(nn.Module):
         # Generate irreps
         self.irreps = Irreps(representation_type)
 
-    def getTransformation(self, pose1: torch.Tensor, pose2: torch.Tensor):
+    def getTransformation(self, pose0: torch.Tensor, pose1: torch.Tensor, log = False, step = -1):
 
         # Compute relative pose
         pose0_inv = invert_matrix(pose0)
         pose_rel = pose0_inv @ pose1
-        alpha, beta, gamma = matrix_to_angles(pose_rel[:3, :3])
-
+        
         # Compute the block-diagonal rotation matrix in the irreps space
+        alpha, beta, gamma = matrix_to_angles(pose_rel[:3, :3])
         R = self.irreps.D_from_angles(alpha, beta, gamma)
+
+        # Log relative pose angles and distances
+        if log:
+            run = getAimRun()
+            run.track(
+                {
+                    "train/equivariance/relative_pose/alpha": alpha,
+                    "train/equivariance/relative_pose/beta": beta,
+                    "train/equivariance/relative_pose/gamma": gamma,
+                    "train/equivariance/relative_pose/x": pose_rel[:4, :0],
+                    "train/equivariance/relative_pose/y": pose_rel[:4, :1],
+                    "train/equivariance/relative_pose/z": pose_rel[:4, :2]
+                },
+                context={"subset": "train"},
+                step=step
+            )
+
         return R
 
 class GeneratorSOn(nn.Module):
@@ -176,14 +190,11 @@ class GeneratorSOn(nn.Module):
         self.output_dim = feature_dim * (feature_dim - 1) / 2
         self.rotation_decoder = MonotonicAngleDecoder()
 
-    def getTransformation(self, pose0: torch.Tensor, pose1: torch.Tensor):
+    def getTransformation(self, pose0: torch.Tensor, pose1: torch.Tensor, log = False, step = -1):
 
         # Compute relative position
         pose0_inv = invert_matrix(pose0)
         pose_rel = pose0_inv @ pose1
-
-        # Compute relative position
-        # x, y, z = pose_rel[0, 3].item(), pose_rel[1, 3].item(), pose_rel[2, 3].item()
 
         # Compute input angles
         alpha, beta, gamma = matrix_to_angles(pose_rel[:3, :3])
@@ -204,6 +215,23 @@ class GeneratorSOn(nn.Module):
 
         # Generate rotation matrix
         rotation_matrix = torch.matrix_exp(generator_matrix)
+
+        # Log relative pose angles and distances
+        if log:
+            run = getAimRun()
+            run.track(
+                {
+                    "train/equivariance/relative_pose/alpha": alpha,
+                    "train/equivariance/relative_pose/beta": beta,
+                    "train/equivariance/relative_pose/gamma": gamma,
+                    "train/equivariance/relative_pose/x": pose_rel[:4, :0],
+                    "train/equivariance/relative_pose/y": pose_rel[:4, :1],
+                    "train/equivariance/relative_pose/z": pose_rel[:4, :2]
+                },
+                context={"subset": "train"},
+                step=step
+            )
+
         return rotation_matrix
 
 class MonotonicAngleDecoder(nn.Module):
@@ -287,7 +315,13 @@ class EqSelfDistill(nn.Module):
         mask: torch.Tensor,
         flips: torch.Tensor,
         patch_size=14,
+        log = False,
+        step = None
     ) -> Tuple[torch.Tensor, dict]:
+
+        # Copy log variable because this function should only log the first iteration
+        should_log = log
+        metrics = {}
 
         # Choose between ground truth or estimated data
         depth = depth if self.use_gt else estimated_depth
@@ -305,7 +339,7 @@ class EqSelfDistill(nn.Module):
 
         # Retroproject points
         depth_flat = rearrange(depth, "b c h w -> b (h w) c")
-        points_flat = torch.stack([
+        points3d_flat = torch.stack([
             rays_flat[..., 0] * depth_flat[..., 0] / rays_flat[..., 2],
             rays_flat[..., 1] * depth_flat[..., 0] / rays_flat[..., 2],
             depth_flat[..., 0]
@@ -313,11 +347,11 @@ class EqSelfDistill(nn.Module):
         mask_flat = rearrange(mask, "b c h w -> b (h w) c")
         
         # Transform to global coordinates
-        B, N, _ = points_flat.shape
-        ones = torch.ones(B, N, 1, device=points_flat.device)
-        points_flat = torch.cat([points_flat, ones], dim=-1)
-        points_flat = torch.bmm(extrinsics, points_flat.transpose(-2, -1))
-        points_flat = points_flat.permute(0, 2, 1)[:, :, :3]   # Drop the homogeneous coordinate
+        B, N, _ = points3d_flat.shape
+        ones = torch.ones(B, N, 1, device=points3d_flat.device)
+        points3d_flat = torch.cat([points3d_flat, ones], dim=-1)
+        points3d_flat = torch.bmm(extrinsics, points3d_flat.transpose(-2, -1))
+        points3d_flat = points3d_flat.permute(0, 2, 1)[:, :, :3]   # Drop the homogeneous coordinate
         
         # Calculate intersection over union metrics
         box_ious, box_ioas, box_iobs = [], [], []
@@ -325,25 +359,41 @@ class EqSelfDistill(nn.Module):
         for i in range(B // 2):
             left, right = 2 * i, 2 * i + 1
             mask0_flat, mask1_flat = mask_flat[left], mask_flat[right]
-            points0_flat, points1_flat = points_flat[left][mask0_flat.squeeze(-1)], points_flat[right][mask1_flat.squeeze(-1)]
-            box_iou, box_ioa, box_iob = bbox_intersections(points0_flat, points1_flat)
+            points3d0_flat, points3d1_flat = points3d_flat[left][mask0_flat.squeeze(-1)], points3d_flat[right][mask1_flat.squeeze(-1)]
+            box_iou, box_ioa, box_iob = bbox_intersections(points3d0_flat, points3d1_flat)
             box_ious.append(box_iou); box_ioas.append(box_ioa); box_iobs.append(box_iob)
-            vox_iou, vox_ioa, vox_iob = voxelized_intersections(points0_flat, points1_flat, factor=0.1)
+            vox_iou, vox_ioa, vox_iob = voxelized_intersections(points3d0_flat, points3d1_flat, factor=0.1)
             vox_ious.append(vox_iou); vox_ioas.append(vox_ioa); vox_iobs.append(vox_iob)
         box_ious = torch.cat([t.unsqueeze(0) for t in box_ious], dim=0); box_ioas = torch.cat([t.unsqueeze(0) for t in box_ioas], dim=0); box_iobs = torch.cat([t.unsqueeze(0) for t in box_iobs], dim=0)
         vox_ious = torch.cat([t.unsqueeze(0) for t in vox_ious], dim=0); vox_ioas = torch.cat([t.unsqueeze(0) for t in vox_ioas], dim=0); vox_iobs = torch.cat([t.unsqueeze(0) for t in vox_iobs], dim=0)
         print(f"IOU: {vox_ious}")
 
+        # Log input point cloud REMOVE TEMPORARY
+        if should_log:
+            metrics["BoxIntersectionOverUnionSample"] = box_ious[0]
+            metrics["VoxIntersectionOverUnionSample"] = vox_ious[0]
+            save_point_cloud(
+                f"train_point_cloud_{step:06d}",
+                torch.cat([points3d_flat[0], points3d_flat[1]], dim=0),
+                torch.cat([
+                    torch.tensor([0, 255, 0], dtype=torch.uint8).repeat(points3d_flat[0].shape[0], 1),
+                    torch.tensor([255, 0, 0], dtype=torch.uint8).repeat(points3d_flat[1].shape[0], 1)
+                    ],
+                    dim=0
+                )
+            )
+
         # Choose the ray closest to the patch center
         rays = rearrange(rays_flat, "b (h w) c -> b c h w", h=H, w=W)
-        points = rearrange(points_flat, "b (h w) c -> b c h w", h=H, w=W) 
-        depth, rays, points, mask, chosen_mask = gather_nearest_patch_center_samples(depth, rays, points, mask, patch_size)        
+        points3d = rearrange(points3d_flat, "b (h w) c -> b c h w", h=H, w=W) 
+        depth, rays, points3d, mask, points2d = gather_nearest_patch_center_samples(depth, rays, points3d, mask, patch_size)        
 
         # Flatten tensors                                     
         # depth_flat = rearrange(depth, "b c h w -> b (h w) c")
         # rays_flat = rearrange(rays, "b c h w -> b (h w) c")
-        points_flat = rearrange(points, "b c h w -> b (h w) c")
+        points3d_flat = rearrange(points3d, "b c h w -> b (h w) c")
         mask_flat = rearrange(mask, "b c h w -> b (h w) c")
+        points2d_flat = rearrange(points2d, "b c h w -> b (h w) c")
         features_flat = rearrange(feature, "b c h w -> b (h w) c")
         
         # Create change of basis matrixes
@@ -355,7 +405,8 @@ class EqSelfDistill(nn.Module):
         for i in range(B // 2):
             left, right = 2 * i, 2 * i + 1
             image0, image1 = (image[left], image[right]) if image is not None else (None, None)
-            points0, points1 = points_flat[left], points_flat[right]
+            points3d0, points3d1 = points3d_flat[left], points3d_flat[right]
+            points2d0, points2d1 = points2d_flat[left], points2d_flat[right]
             feature0, feature1 = features_flat[left], features_flat[right]
             extrinsics0, extrinsics1 = extrinsics[left], extrinsics[right]
             mask0, mask1 = mask_flat[left], mask_flat[right]
@@ -371,19 +422,25 @@ class EqSelfDistill(nn.Module):
 
             if self.use_gt:
                 mask0, mask1 = mask0.squeeze(), mask1.squeeze()
-                points0 = points0[mask0]
-                points1 = points1[mask1]
+                points3d0 = points3d0[mask0]
+                points3d1 = points3d1[mask1]
+                points2d0 = points2d0[mask0]
+                points2d1 = points2d1[mask1]
                 feature0 = feature0[mask0]
                 feature1 = feature1[mask1]
 
+            # Log number of points    
+            if should_log:
+                metrics["NumSelectedPointsSample"] = torch.tensor(points3d0.size(0) + points3d1.size(0))
+
             # Calculate matrix of distances between 3D points
-            distances = torch.cdist(points0, points1, p=2)
+            distances = torch.cdist(points3d0, points3d1, p=2)
 
             # Compute matching plan 
             reg = 0.05       # entropy regularization
             reg_m = 1.0      # mass relaxation for unbalanced OT
-            A = torch.ones(points0.shape[0], device=points0.device)
-            B = torch.ones(points1.shape[0], device=points1.device)
+            A = torch.ones(points3d0.shape[0], device=points3d0.device)
+            B = torch.ones(points3d1.shape[0], device=points3d1.device)
             A /= A.sum()
             B /= B.sum()            
             # defaults: method='sinkhorn', reg_type='kl', numItermax=1000, stopThr=1e-6, verbose=False
@@ -398,11 +455,31 @@ class EqSelfDistill(nn.Module):
             mutual_mask = matches_b[matches_a] == matches_a_indices  # only keep if mutual
             matches = torch.stack([matches_a_indices[mutual_mask], matches_a[mutual_mask]], dim=1)
 
-            # TODO: SKIP IF THERE IS NOT ENOUGH MATCHES.
+            # Skip if there is not matches
+            if len(matches) == 0:
+                continue
 
+            # Log artifacts if needed
+            if should_log:
+
+                print("Logging Artifacts.")
+
+                log_equivariant_loss_artifacts(
+                    image0=image0, image1=image1, 
+                    mask0=rearrange(mask0, "(h w) -> h w", h=num_patches_y, w=num_patches_x), mask1=rearrange(mask1, "(h w) -> h w", h=num_patches_y, w=num_patches_x), 
+                    feature0=feature0, feature1=feature1, 
+                    points2d0=points2d0, points2d1=points2d1,
+                    matches=matches,
+                    step = step
+                )
+            
             # Filter out not matched points
             feature0 = feature0[matches[:, 0]]
             feature1 = feature1[matches[:, 1]]
+
+            # Track number of matched points
+            if should_log:
+                metrics["NumMatchedFeaturesSample"] = torch.tensor(feature0.size(0))
 
             # Change of base for the feature vectors
             feature0_transformed = torch.matmul(change_base, feature0.T).T
@@ -424,6 +501,9 @@ class EqSelfDistill(nn.Module):
             features1.append(feature1)
             features0.append(feature1_transformed)
             features1.append(feature0)
+
+            # Log only the first iteration
+            should_log = False
 
         # Compute aggregated loss
         if len(features0) > 0 and len(features1) > 0:

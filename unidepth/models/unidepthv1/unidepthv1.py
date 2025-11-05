@@ -4,6 +4,7 @@ Licensed under the CC-BY NC 4.0 license (http://creativecommons.org/licenses/by-
 """
 
 import importlib
+import json
 from copy import deepcopy
 from math import ceil
 
@@ -21,7 +22,9 @@ from unidepth.utils.distributed import is_main_process
 from unidepth.utils.geometric import (generate_rays,
                                       spherical_zbuffer_to_euclidean)
 from unidepth.utils.misc import get_params, match_gt
-from unidepth.utils import getSummaryWriter, colorize
+from unidepth.utils import getAimRun
+from unidepth.utils.visualization import rescale, colorize
+from aim import Image, Text, Distribution
 
 MAP_BACKBONES = {"ViTL14": "vitl14", "ConvNextL": "cnvnxtl"}
 
@@ -112,20 +115,45 @@ class UniDepthV1(
         self.build_losses(config)
         self.eps = eps
 
-    def forward(self, inputs, image_metas, step):
+    def forward(self, inputs, image_metas, log=False, step=None):
         rgbs = inputs["image"]
 
-        # Log Input Artifacts with TensorBoard
-        if step % 50 == 0 and self.training:
-            summary_writer = getSummaryWriter()
-            summary_writer.add_images(f"Artifacts/Train/OriginalImage", inputs["image_original"], step, dataformats="NCHW")
-            summary_writer.add_images(f"Artifacts/Train/PreprocessedImage", inputs["image"], step,  dataformats="NCHW")
-            summary_writer.add_images(f"Artifacts/Train/GroundTruthDepth", colorize(inputs["depth"]), step, dataformats="NCHW")
-            summary_writer.add_images(f"Artifacts/Train/DepthMask", inputs["depth_mask"], step, dataformats="NCHW")
+        # Check if this method should log artifacts
+        if log: assert step is not None
+        # Log input artifacts with Aim
+        if log:
 
-            # Log values for each image
+            # Log with Aim
+            run = getAimRun()
+            
+            # Log text with image metadata
+            selected = ["dataset_name", "filename", "si", "dense", "synthetic", "valid_camera", "valid_pose", "flip"]
+            metas = [{prop: sequence[prop][i] for prop in selected} for sequence in image_metas for i in range(len(next(iter(sequence.values()))))]
+            run.track([Text(json.dumps(meta)) for meta in metas], name="artifacts/train/image_metas", context={"subset": "train"}, step=step)
+            
+            # Log original input images
+            datasets = [dataset for meta in image_metas for dataset in meta["dataset_name"]]
+            filenames = [filename for meta in image_metas for filename in meta["filename"]]
+            images = [image for image in inputs["image_original"]]
+            run.track([Image(image, caption=f"{dataset}: {filename}") for image, dataset, filename in zip(images, datasets, filenames)], name="artifacts/train/original_image", context={"subset": "train"}, step=step)
+            
+            # Log preprocessed images
+            preprocessed_images = [rescale(image) for image in inputs["image"]]
+            run.track([Image(preprocessed_image, caption=f"{dataset}: {filename}") for preprocessed_image, dataset, filename in zip(preprocessed_images, datasets, filenames)], name="artifacts/train/preprocessed_image", context={"subset": "train"}, step=step)
+            
+            # Log depths
+            depths = [colorize(depth.squeeze().detach().cpu().numpy()) for depth in inputs["depth"]]
+            run.track([Image(depth, caption=f"{dataset}: {filename}") for depth, dataset, filename in zip(depths, datasets, filenames)], name="artifacts/train/depth", context={"subset": "train"}, step=step)
             for i in range(inputs["depth"].shape[0]):
-                summary_writer.add_histogram(f"Artifacts/Train/GroundTruthDepthValues/{i}", inputs["depth"][i:i+1], step)
+                run.track(Distribution(inputs["depth"][i].detach().cpu().numpy()), name=f"artifacts/train/depth_distribution", context={"subset": "train", "index": i}, step=step)
+                run.track(Distribution(inputs["depth"][i].detach().cpu().numpy()), name=f"artifacts/train/depth_distribution_by_dataset", context={"subset": "train", "dataset": datasets[i]}, step=step)
+            
+            # Log depth mask
+            masks = [mask.float() for mask in inputs["depth_mask"]]
+            run.track([Image(mask, caption=f"{dataset}: {filename}") for mask, dataset, filename in zip(masks, datasets, filenames)], name="artifacts/train/depth_mask", context={"subset": "train"}, step=step)
+            
+            # Log distance between frames # TODO: IT DOES NOT LOG ARRAYS
+            run.track(image_metas[0]["frames_offset"], name="train/frames_offset")
 
         B, _, H, W = rgbs.shape
         cameras = inputs["camera"]
@@ -194,23 +222,31 @@ class UniDepthV1(
         }
         self.pixel_decoder.test_fixed_camera = False
 
-        # Log Output Artifacts with TensorBoard
-        if step % 50 == 0 and self.training:
-            summary_writer = getSummaryWriter()
-            summary_writer.add_images(f"Artifacts/Train/EstimatedDepth", colorize(outputs["depth"]), step, dataformats="NCHW")
-            summary_writer.add_images(f"Artifacts/Train/DepthError", colorize(outputs["depth"]-inputs["depth"]), step, dataformats="NCHW")
-            # TODO: CALCULATE ERROR
-
-            # Log values for each image
-            for i in range(inputs["depth"].shape[0]):
-                summary_writer.add_histogram(f"Artifacts/Train/EstimatedDepthValues/{i}", outputs["depth"], step)
+        # Log output artifacts with Aim
+        if log:
             
-        
-        losses, metrics = self.compute_losses(outputs, inputs, image_metas)
+            # Log with Aim
+            run = getAimRun()
+
+            # Log estimated depths
+            datasets = [dataset for meta in image_metas for dataset in meta["dataset_name"]]
+            filenames = [filename for meta in image_metas for filename in meta["filename"]]
+            estimated_depths = [colorize(estimated_depth.squeeze().detach().cpu().numpy()) for estimated_depth in outputs["depth"]]
+            run.track([Image(estimated_depth, caption=f"{dataset}: {filename}") for estimated_depth, dataset, filename in zip(estimated_depths, datasets, filenames)], name="artifacts/train/estimated_depth", context={"subset": "train"}, step=step)
+            for i in range(inputs["depth"].shape[0]):
+                run.track(Distribution(outputs["depth"][i].detach().cpu().numpy()), name=f"artifacts/train/estimated_depth_distribution", context={"subset": "train", "index": i}, step=step)
+            
+            # Log depth error
+            estimated_depth_errors = [colorize((estimated_depth - depth).squeeze().detach().cpu().numpy()) for estimated_depth, depth in zip(outputs["depth"], inputs["depth"])]
+            run.track([Image(estimated_depth_error, caption=f"{dataset}: {filename}") for estimated_depth_error, dataset, filename in zip(estimated_depth_errors, datasets, filenames)], name="artifacts/train/estimated_depth_error", context={"subset": "train"}, step=step)
+            for i in range(inputs["depth"].shape[0]):
+                run.track(Distribution((outputs["depth"][i] - inputs["depth"][i]).detach().cpu().numpy()), name=f"artifacts/train/estimated_depth_error_distribution", context={"subset": "train", "index": i}, step=step)
+
+        losses, metrics = self.compute_losses(outputs, inputs, image_metas, log, step)
     
         return outputs, losses, metrics
 
-    def compute_losses(self, outputs, inputs, image_metas):
+    def compute_losses(self, outputs, inputs, image_metas, log=False, step=None):
         losses = {"opt": {}, "stat": {}}
         metrics = {}
         if (
@@ -220,7 +256,7 @@ class UniDepthV1(
         losses_to_be_computed = list(self.losses.keys())
 
         # depth loss
-        si = torch.tensor([x.get("si", False) for x in image_metas], device=self.device).reshape(-1, 1)
+        si = torch.tensor([meta.get("si", False) for meta in image_metas], device=self.device).reshape(-1, 1)
         loss = self.losses["depth"]
         depth_losses = loss(
             outputs["depth"],
@@ -241,7 +277,7 @@ class UniDepthV1(
 
         # Invariance loss
         if "invariance" in losses_to_be_computed:
-            flips = torch.tensor([x.get("flip", False) for x in image_metas], device=self.device).reshape(-1, 1)
+            flips = torch.tensor([meta.get("flip", False) for meta in image_metas], device=self.device).reshape(-1, 1)
             idxs = [
                 i * meta["num_copies"] * meta["num_frames"] + j + offset
                 for i, meta in enumerate(image_metas)
@@ -260,7 +296,7 @@ class UniDepthV1(
 
         # Equivariance loss
         if "equivariance" in losses_to_be_computed:
-            flips = torch.tensor([x.get("flip", False) for x in image_metas], device=self.device).reshape(-1, 1)
+            flips = torch.tensor([meta.get("flip", False) for meta in image_metas], device=self.device).reshape(-1, 1)
             idxs = [
                 i * meta["num_copies"] * meta["num_frames"] + j * meta["num_copies"] + offset
                 for i, meta in enumerate(image_metas)
@@ -270,7 +306,7 @@ class UniDepthV1(
             ]
             loss = self.losses["equivariance"]
             equivariance_losses, equivariance_metrics = loss(
-                image = None, # Enable when saving intermediate values
+                image = inputs["image_original"][idxs],
                 feature = outputs["cond_features"][idxs],
                 depth = inputs["depth"][idxs],
                 intrinsics = inputs["camera"].K[idxs],
@@ -279,6 +315,8 @@ class UniDepthV1(
                 extrinsics = inputs["cam2w"][idxs],
                 mask = inputs["depth_mask"][idxs],
                 flips = flips[idxs],
+                log=log,
+                step=step
             )
             losses["opt"][loss.name] = loss.weight * equivariance_losses.mean()
             losses_to_be_computed.remove("equivariance")
