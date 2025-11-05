@@ -42,8 +42,9 @@ class Sintel(SequenceDataset):
             **kwargs,
         )
 
-    def pre_pipeline(self, results):
+    def pre_pipeline(self, results):    
         results = super().pre_pipeline(results)
-        results["dense"] = [True] * self.num_frames
-        results["synthetic"] = [True] * self.num_frames
+        results["dense"] = [True] * self.num_frames * self.num_copies
+        results["synthetic"] = [True] * self.num_frames * self.num_copies
+        results["quality"] = [0] * self.num_frames * self.num_copies
         return results
