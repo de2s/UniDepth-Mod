@@ -75,14 +75,15 @@ class KITTIMulti(SequenceDataset):
         self.resizer.ctx = None
         for i, seq in enumerate(results["sequence_fields"]):
             results[seq] = self.cropper_base(results[seq])
-            results[seq] = self.resizer(results[seq])
-            for key in results[seq].get("image_fields", ["image"]):
-                if "original" not in key:
-                    results[seq][key] = results[seq][key].to(torch.float32) / 255
-        results.update({k: v for k, v in results[(0, 0)].items() if "fields" in k})
+            # This is done in SequenceDataset class:
+            #results[seq] = self.resizer(results[seq])
+            #for key in results[seq].get("image_fields", ["image"]):
+            #    if "original" not in key:
+            #        results[seq][key] = results[seq][key].to(torch.float32) / 255
+        #results.update({k: v for k, v in results[(0, 0)].items() if "fields" in k})
 
-        results = self.pack_batch(results)
-        return results
+        #results = self.pack_batch(results)
+        return super().preprocess(results)
 
     def eval_mask(self, valid_mask, info={}):
         """Do grag_crop or eigen_crop for testing"""
