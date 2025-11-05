@@ -31,7 +31,7 @@ def log_equivariant_loss_artifacts(
     # Get logger
     run = getAimRun()
 
-    # Get temp folder
+    # Get path on temp folder
     temp_folder = os.path.join(os.environ["CACHE"], "temp")
     file_name = "equivariant_loss_tensors.pth"
     path = os.path.join(temp_folder, file_name)
@@ -48,7 +48,7 @@ def log_equivariant_loss_artifacts(
             }, 
             path
         )
-        run.log_artifact(path, name="equivariant_loss_tensors")
+        run.log_artifact(path, name="artifacts/train/equivariant_loss_tensors")
 
     ### PLOT ORIGINAL IMAGES ###
     
@@ -115,9 +115,6 @@ def save_point_cloud(tag, points, colors):
     # Ensure colors are int and in 0-255
     colors = colors.clamp(0, 255).to(torch.uint8)
 
-    # Create filename
-    filename = f"{tag}.ply"
-
     # Build body efficiently in memory
     buf = io.StringIO()
 
@@ -145,13 +142,18 @@ def save_point_cloud(tag, points, colors):
     buf.write(data_str)
     buf.write("\n")
 
+    # Get path on temporary folder
+    temp_folder = os.path.join(os.environ["CACHE"], "temp")
+    filename = f"{tag}.ply"
+    path = os.path.join(temp_folder, filename)  
+
     # Write once to disk
-    with open(filename, "w") as f:
+    with open(path, "w") as f:
         f.write(buf.getvalue())
 
     # Log artifact
     run = getAimRun()
-    run.log_artifact(filename)
+    run.log_artifact(path, name="artifacts/train/point_clouds")
 
     # Delete file
-    os.remove(filename)
+    os.remove(path)
