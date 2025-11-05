@@ -530,18 +530,24 @@ def main_worker(config: Dict[str, Any], args: argparse.Namespace):
 
             # Log gradients before they are deleted
             if step % config["training"]["log_train_metrics_interval"] == 0 and is_main_process():
+                logNaN = False
+                logInf = False
                 for name, param in model.named_parameters():
                     if param.grad is not None:
                         grad = param.grad
                         # Check for NaN or Inf, log only if the gradient is finite
-                        if torch.isnan(grad).any(): # or 
-                            print(f"Warning: {name} has invalid values in its gradient!")
+                        if torch.isnan(grad).any():
+                            logNaN = True
                         elif torch.isinf(grad).any():
-                            print(f"Warning: {name} has infinite values in its gradient!")
+                            logInf = True
                         else:
                             # Log with AIM
                             run = getAimRun()
                             run.track(Distribution(grad.detach().cpu().numpy()), name=f"gradients/{name}", context={"subset": "train"}, step=step)
+                if logNaN:
+                    print(f"Warning: Gradient with NaN values!")
+                if logInf:
+                    print(f"Warning: Gradient with Inf values!")
 
             optimizer.zero_grad(set_to_none=True)
             if step % EMA_INTERVAL == 0:
