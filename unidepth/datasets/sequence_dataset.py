@@ -17,6 +17,7 @@ from unidepth.datasets.utils_decode import (decode_camera, decode_depth,
                                             decode_numpy, decode_rgb,
                                             decode_tensor)
 from unidepth.utils.distributed import is_main_process
+from unidepth.utils import (eval_sequence)
 
 
 class SequenceDataset(BaseDataset):
@@ -165,39 +166,53 @@ class SequenceDataset(BaseDataset):
             idx1 = np.random.randint(0, num_samples_sequence - self.sampling_window_size)
             idx2 = np.random.randint(idx1 + 1, idx1 + self.sampling_window_size)
             indices = [idx1, idx2]
-            return indices, np.random.randint(0, len(indices))
+            return indices, np.random.randint(0, len(indices)) # TODO: This is where `frame_idx` is created. Maybe we should always return 0?
         
         else:
             raise ValueError("Sampling method not implemented")
 
 
     def get_test_idxs(self, num_samples_sequence, keyframe_idx):
-        if self.num_frames == 1:
-            return [
-                keyframe_idx if keyframe_idx is not None else num_samples_sequence // 2
-            ], 0
 
-        if self.num_frames == -1:
-            cap_idxs = min(32, num_samples_sequence)  # CAP 32 images
-            idxs = list(
-                range(max(0, num_samples_sequence - cap_idxs), num_samples_sequence, 1)
+        if self.sampling_mode == "continuous":  
+
+            if self.num_frames == 1:
+                return [
+                    keyframe_idx if keyframe_idx is not None else num_samples_sequence // 2
+                ], 0
+
+            if self.num_frames == -1:
+                cap_idxs = min(32, num_samples_sequence)  # CAP 32 images
+                idxs = list(
+                    range(max(0, num_samples_sequence - cap_idxs), num_samples_sequence, 1)
+                )
+                return idxs, keyframe_idx
+
+            # pick closest keyframe_idx st they are around it or capped by the 0 and max num_samples_sequence
+            keyframe_idx = (
+                keyframe_idx if keyframe_idx is not None else num_samples_sequence - 1
             )
-            return idxs, keyframe_idx
+            excess_tail = 0 - min(0, keyframe_idx - self.num_frames // 2)
+            excess_head = (
+                max(num_samples_sequence, keyframe_idx + (self.num_frames - 1) // 2)
+                - num_samples_sequence
+            )
+            start = keyframe_idx - self.num_frames // 2 + excess_tail - excess_head
+            end = keyframe_idx + (self.num_frames - 1) // 2 + excess_head - excess_tail
+            idxs = list(range(start, 1 + end))
 
-        # pick closest keyframe_idx st they are around it or capped by the 0 and max num_samples_sequence
-        keyframe_idx = (
-            keyframe_idx if keyframe_idx is not None else num_samples_sequence - 1
-        )
-        excess_tail = 0 - min(0, keyframe_idx - self.num_frames // 2)
-        excess_head = (
-            max(num_samples_sequence, keyframe_idx + (self.num_frames - 1) // 2)
-            - num_samples_sequence
-        )
-        start = keyframe_idx - self.num_frames // 2 + excess_tail - excess_head
-        end = keyframe_idx + (self.num_frames - 1) // 2 + excess_head - excess_tail
-        idxs = list(range(start, 1 + end))
+            return idxs, idxs.index(keyframe_idx)
+    
+        elif self.sampling_mode == "neighboor":
 
-        return idxs, idxs.index(keyframe_idx)
+            # Get the first index
+            idx1 = np.random.randint(0, num_samples_sequence - self.sampling_window_size)
+            idx2 = np.random.randint(idx1 + 1, idx1 + self.sampling_window_size)
+            indices = [idx1, idx2]
+            return indices, np.random.randint(0, len(indices))
+        
+        else:
+            raise ValueError("Sampling method not implemented")
 
     def get_single_sequence(self, idx):
         self.num_frames = self.original_num_frames
@@ -222,6 +237,7 @@ class SequenceDataset(BaseDataset):
         results = {}
         results = self.pre_pipeline(results)
         results["sequence_fields"] = [(i, 0) for i in range(self.num_frames)]
+        results["frames_offset"] = [idxs[1] - idxs[0]] # TODO: IT ONLY SUPPORTS PAIRS OF FRAMES NOW
         results["keyframe_idx"] = keyframe_idx
         with tables.File(
             h5_path,
@@ -327,3 +343,47 @@ class SequenceDataset(BaseDataset):
         if is_main_process():
             info = f"Loaded {self.__class__.__name__} with {sum([len(x['image']) for x in self.sequences])} images in {len(self)} sequences."
             print(info)
+
+    # Process metrics for sequence datasets
+
+    def prepare_consistency_eval(self, inputs, preds):
+        new_preds = {}
+        cam2ws = inputs["cam2w"]
+        for key, val in preds.items():
+            if "points" in key:
+                new_preds[key] = val
+        return cam2ws, new_preds  
+    
+    @torch.autocast(device_type="cuda", enabled=False, dtype=torch.float32)
+    def accumulate_metrics(
+        self,
+        inputs,
+        preds,
+        keyframe_idx=None,
+        metrics=["depth", "points", "flow_fwd", "pairwise", "cam2w"],
+    ):
+        super().accumulate_metrics(inputs, preds, keyframe_idx, metrics)
+
+        available_metrics = []
+        if "cam2w" in metrics and "cam2w" in inputs.keys():
+            available_metrics.append("cam2w")
+
+        # Compute sequence metrics only when it is a sequence dataset
+        if "cam2w" in available_metrics and keyframe_idx is not None:
+            cam2ws, preds = self.prepare_consistency_eval(inputs, preds) # TODO: Include `keyframe_idx` to compute consystency between more than two frames
+            self.accumulate_metrics_sequence(cam2ws, preds)
+    
+    @torch.autocast(device_type="cuda", enabled=False, dtype=torch.float32)
+    def accumulate_metrics_sequence(self, cam2ws, preds):
+        for eval_type, pred in preds.items():
+            log_name = eval_type.replace("points", "").strip("-").strip("_")
+            if log_name not in self.metrics_store:
+                self.metrics_store[log_name] = {}
+            
+            for k, v in eval_sequence(cam2ws, pred).items():
+                current_metric = self.metrics_store[log_name].get(
+                    k, torch.tensor([], device=cam2ws.device)
+                )
+                self.metrics_store[log_name][k] = torch.cat([current_metric, v])
+            
+        

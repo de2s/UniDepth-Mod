@@ -164,6 +164,7 @@ class BaseDataset(Dataset):
     def prepare_depth_eval(self, inputs, preds):
         new_preds = {}
         keyframe_idx = getattr(self, "keyframe_idx", None)
+        if keyframe_idx != None: raise NotImplementedError("This configuration has not ben tested yet")
         slice_idx = slice(
             keyframe_idx, keyframe_idx + 1 if keyframe_idx is not None else None
         )
@@ -270,7 +271,8 @@ class BaseDataset(Dataset):
             cnts = sync_tensor_across_gpus(self.metrics_count[eval_type])
             for name, val in self.metrics_store[eval_type].items():
                 # vals_r = (sync_tensor_across_gpus(val) * cnts / cnts.sum()).sum()
-                vals_r = sync_tensor_across_gpus(val).mean()
+                vals = sync_tensor_across_gpus(val)
+                vals_r = vals.mean()
                 metric_vals[f"{eval_type}_{name}".strip("_")] = np.round(
                     vals_r.cpu().item(), 5
                 )
@@ -283,6 +285,7 @@ class BaseDataset(Dataset):
             for j in range(1, self.num_copies):
                 results[(i, j)] = {k: deepcopy(v) for k, v in results[(i, 0)].items()}
                 results["sequence_fields"].append((i, j))
+                results["filename"].append(results["filename"][i])
         return results
 
     def log_load_dataset(self):

@@ -19,13 +19,20 @@ def original_image(batch, preds=None):
     ]  # lrtb
 
     T, _, H, W = batch["data"]["depth"].shape
-    batch["data"]["image"] = F.interpolate(
-        batch["data"]["image"],
-        (H + paddings[2] + paddings[3], W + paddings[1] + paddings[2]),
-        mode="bilinear",
-        align_corners=False,
-        antialias=True,
-    )
+    resized_images = []
+    for i in range(T):
+        p = paddings[i]
+        resized_images.append(
+            F.interpolate(
+                batch["data"]["image"][i].unsqueeze(0),
+                (H + p[2] + p[3], W + p[1] + p[2]), # TODO: IS THIS AN ERROR?
+                mode="bilinear",
+                align_corners=False,
+                antialias=True,
+            )
+        )
+    batch["data"]["image"] = torch.cat(resized_images, dim=0)
+
     batch["data"]["image"] = remove_padding(
         batch["data"]["image"], paddings.repeat(T, 1)
     )
@@ -33,13 +40,21 @@ def original_image(batch, preds=None):
     if preds is not None:
         for key in ["depth"]:
             if key in preds:
-                preds[key] = F.interpolate(
-                    preds[key],
-                    (H + paddings[2] + paddings[3], W + paddings[1] + paddings[2]),
-                    mode="bilinear",
-                    align_corners=False,
-                    antialias=True,
-                )
+                T, _, H, W = preds[key].shape
+                resized_preds = []
+                for i in range(T):
+                    p = paddings[i]
+                    resized_preds.append(
+                        F.interpolate(
+                            preds[key],
+                            (H + p[2] + p[3], W + p[1] + p[2]),
+                            mode="bilinear",
+                            align_corners=False,
+                            antialias=True,
+                        )
+                    )
+                preds[key] = torch.cat(resized_preds, dim=0)
+
                 preds[key] = remove_padding(preds[key], paddings.repeat(T, 1))
 
     return batch, preds
@@ -63,7 +78,7 @@ def log_metrics(metrics_all, step):
                 pass
 
 
-def validate(model, test_loaders, step, context):
+def validate(model, test_loaders, context, log=False, step=None):
     metrics_all = {}
     for name_ds, test_loader in test_loaders.items():
         for i, batch in enumerate(test_loader):
@@ -72,13 +87,18 @@ def validate(model, test_loaders, step, context):
                     k: v.to(model.device) for k, v in batch["data"].items()
                 }
                 # remove temporal dimension of the dataloder, here is always 1!
-                batch["data"] = {k: v.squeeze(1) for k, v in batch["data"].items()}
-                batch["img_metas"] = [
-                    {k: v[0] for k, v in meta.items() if isinstance(v, list)}
-                    for meta in batch["img_metas"]
-                ]
+                batch["data"] = {
+                    #k: v.squeeze(1) for k, v in batch["data"].items() # CHANGED THIS TO PREVENT EXCEPTION WHEN NUM_FRAMES IS NOT 1
+                    k: torch.flatten(v, 0, 1) for k, v in batch["data"].items()
+                }
+                # By enable other functions to process a batch of multiple iamges, this is not needed anymore because it creates a dict with only the entries of the first element.
+                # batch["img_metas"] = [
+                #    #{k: v[0] for k, v in meta.items() if isinstance(v, list)} # THE PROBLEM IS HERE BECAUSE IT REMOVES ONE PARENTHESIS...
+                #    {k: v for k, v in meta.items() if isinstance(v, list)} # CHANGED THIS TO PREVENT EXCEPTION WHEN NUM_FRAMES IS NOT 1 ## TODO: IT'S NOT COPYING THE DISTANCE BETWEEN FRAMES BECAUSE IT IS NOT A LIST
+                #    for meta in batch["img_metas"]
+                # ]
 
-                preds, losses, metrics = model(batch["data"], batch["img_metas"], step)
+                preds, losses, metrics = model(batch["data"], batch["img_metas"], log, step)
 
             batch, _ = original_image(batch, preds=None)
             test_loader.dataset.accumulate_metrics(

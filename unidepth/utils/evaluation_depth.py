@@ -3,8 +3,11 @@ from functools import partial
 
 import torch
 import torch.nn.functional as F
+from einops import rearrange
+from pytorch3d.loss import chamfer_distance
 
 from unidepth.utils.chamfer_distance import ChamferDistance
+
 
 chamfer_cls = ChamferDistance()
 
@@ -89,6 +92,64 @@ def f1_score(tensor1, tensor2, thresholds):
     f1_value = torch.trapz(f1_thresholds) / len(thresholds)
     return f1_value
 
+def filter_by_occupancy_grid_iou(tensor1, tensor2, num_div=100.0, dilate=1):
+
+    min1, _ = tensor1.min(dim=0)
+    max1, _ = tensor1.max(dim=0)
+    
+    min2, _ = tensor2.min(dim=0)
+    max2, _ = tensor2.max(dim=0)
+
+    # 1. Compute bounding box and voxel size
+    grid_min = torch.min(min1, min2)
+    grid_max = torch.max(max1, max2)
+    voxel_size = torch.dist(grid_max, grid_min) / num_div
+
+    # 2. Convert points to voxel indices
+    def points_to_voxels(points):
+        indices = ((points - grid_min) / voxel_size).long()
+        return indices
+    
+    vox1 = points_to_voxels(tensor1)
+    vox2 = points_to_voxels(tensor2)
+    
+    # 3. Create occupancy grids
+    grid_size = ((grid_max - grid_min) / voxel_size).ceil().long()
+    occ1 = torch.zeros(grid_size.tolist(), dtype=torch.bool, device=tensor1.device)
+    occ2 = torch.zeros(grid_size.tolist(), dtype=torch.bool, device=tensor1.device)
+    
+    occ1[vox1[:,0], vox1[:,1], vox1[:,2]] = 1
+    occ2[vox2[:,0], vox2[:,1], vox2[:,2]] = 1
+   
+    # 4. Dilate occupancy grids by 1 voxel using max pooling (cheaper than conv)
+    kernel_size = 2 * dilate + 1
+    if kernel_size > 1:
+        occ1 = F.max_pool3d(occ1[None, None].float(), kernel_size=kernel_size, stride=1, padding=1)[0, 0].bool()
+        occ2 = F.max_pool3d(occ2[None, None].float(), kernel_size=kernel_size, stride=1, padding=1)[0, 0].bool()
+    
+    # 6. Filter points based on intersection of occupancy gri
+    intersection = occ1 & occ2
+    mask1 = intersection[vox1[:,0], vox1[:,1], vox1[:,2]]
+    mask2 = intersection[vox2[:,0], vox2[:,1], vox2[:,2]]
+    
+    tensor1 = tensor1[mask1]
+    tensor2 = tensor2[mask2]
+    
+    return tensor1, tensor2
+
+def consistency(tensor1, tensor2): #Shapes: torch.Size([307200, 3]), torch.Size([307200, 3])
+
+    # Filter points that are not registered in both images
+    tensor1, tensor2 = filter_by_occupancy_grid_iou(tensor1, tensor2, num_div=100, dilate=1)
+
+    # Fallback if no points survived (avoid empty Chamfer distance)
+    if tensor1.shape[0] == 0 or tensor2.shape[0] == 0:
+        return None
+    
+    tensor1 = tensor1.unsqueeze(0)
+    tensor2 = tensor2.unsqueeze(0)
+
+    return chamfer_distance(tensor1, tensor2, batch_reduction="mean", point_reduction="mean")[0]
 
 DICT_METRICS = {
     "d1": partial(delta, exponent=1.0),
@@ -102,8 +163,7 @@ DICT_METRICS = {
     "sqrel": lambda gt, pred: (((gt - pred) ** 2) / gt).mean(),
     "log10": lambda gt, pred: torch.abs(torch.log10(pred) - torch.log10(gt)).mean(),
     "silog": lambda gt, pred: 100 * torch.std(torch.log(pred) - torch.log(gt)).mean(),
-    "medianlog": lambda gt, pred: 100
-    * (torch.log(pred) - torch.log(gt)).median().abs(),
+    "medianlog": lambda gt, pred: 100 * (torch.log(pred) - torch.log(gt)).median().abs(),
     "d_auc": d_auc,
     "tau": partial(tau, perc=0.03),
 }
@@ -128,6 +188,9 @@ DICT_METRICS_D = {
     "abs_rel": lambda gt, pred: (torch.abs(gt - pred) / gt),
 }
 
+DICT_METRICS_SEQUENCE = {
+    "consistency": lambda pred1, pred2: consistency(pred1, pred2),
+}
 
 def eval_depth(
     gts: torch.Tensor, preds: torch.Tensor, masks: torch.Tensor, max_depth=None
@@ -167,4 +230,27 @@ def eval_3d(
             summary_metrics[name].append(
                 fn(gt[:, mask.squeeze()], pred[:, mask.squeeze()], thresholds).mean()
             )
+    return {name: torch.stack(vals, dim=0) for name, vals in summary_metrics.items()}
+
+def eval_sequence(
+    cam2ws: torch.Tensor, 
+    preds: torch.Tensor
+):
+    assert  preds.shape[0] == 2 and preds.shape[0] == cam2ws.shape[0]
+
+    # Transform to global coordinates
+    preds_flat = rearrange(preds, "b c h w -> b (h w) c")
+    B, N, _ = preds_flat.shape
+    ones = torch.ones(B, N, 1, device=preds_flat.device)
+    preds_flat = torch.cat([preds_flat, ones], dim=-1)
+    preds_flat = torch.bmm(cam2ws, preds_flat.transpose(-2, -1))
+    preds_flat = preds_flat.permute(0, 2, 1)[:, :, :3]
+    
+    # Calculate metrics
+    summary_metrics = defaultdict(list)
+
+    for name, fn in DICT_METRICS_SEQUENCE.items():
+        value = fn(preds_flat[0], preds_flat[1])
+        if value: summary_metrics[name].append(value.mean())
+
     return {name: torch.stack(vals, dim=0) for name, vals in summary_metrics.items()}

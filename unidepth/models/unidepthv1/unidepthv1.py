@@ -197,8 +197,8 @@ class UniDepthV1(
         # reshape to match GT as paddings and shape
         if not self.training:
             depth_gt = inputs["depth"]
-            image_paddings = [image_metas[0]["paddings"]]
-            depth_paddings = [image_metas[0]["depth_paddings"]]
+            image_paddings = image_metas[0]["paddings"]
+            depth_paddings = image_metas[0]["depth_paddings"]
             predictions = match_gt(
                 predictions, depth_gt, padding1=image_paddings, padding2=depth_paddings
             )

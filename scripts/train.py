@@ -292,8 +292,10 @@ def main_worker(config: Dict[str, Any], args: argparse.Namespace):
             augmentations_db=augmentations_db,
             normalize=config["data"].get("normalization", "imagenet"),
             resize_method=resize_method,
-            num_frames=1,
+            num_frames=config["data"]["num_frames"],
             mini=1.0,
+            sampling_mode=config["data"]["sampling_mode"],
+            sampling_window_size = config["data"]["sampling_window_size"][dataset],
         )
 
     # Dataset samplers, create distributed sampler pinned to rank
@@ -589,12 +591,19 @@ def main_worker(config: Dict[str, Any], args: argparse.Namespace):
                 if is_main_process():
                     print(f"Validation at {step}th step...")
 
+                # Save current state and reset pseudo random number generator
+                np_rng_state = np.random.get_state()
+                np.random.seed(seed)
+
                 ddp_model.eval()
                 start_validation = time()
                 with torch.no_grad(), ema_handle.average_parameters():
                     metrics = validate(
-                        model, test_loaders=val_loaders, step=step, context=context
+                        model, test_loaders=val_loaders, context=context, log=False, step=step,
                     )
+
+                # Restore random number generator state
+                np.random.set_state(np_rng_state)
 
                 if is_main_process():
                     print(f"Elapsed: {format_seconds(int(time() - start_validation))}")
