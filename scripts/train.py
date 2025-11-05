@@ -2,6 +2,7 @@ import argparse
 import os
 import random
 import uuid
+import signal
 from contextlib import nullcontext
 from datetime import datetime as dt
 from functools import partial
@@ -56,7 +57,16 @@ def aggregate_sync_losses(dict_: dict[str, torch.Tensor], device):
 
 def main_worker(config: Dict[str, Any], args: argparse.Namespace):
 
-    current_process = psutil.Process(os.getpid())
+    pid = os.getpid()
+
+    # Write PID to file
+    if is_main_process():
+        pid_file = os.path.join(os.environ["CACHE"], "unidepth.pid")  
+        with open(pid_file, "w") as f:
+            f.write(str(pid))
+            print(f"PID {pid} written to {pid_file}")
+
+    current_process = psutil.Process(pid)
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
     seed = config["generic"]["seed"]
 
@@ -414,13 +424,19 @@ def main_worker(config: Dict[str, Any], args: argparse.Namespace):
     cpid_memory = current_process.memory_info()[0] / 2.0**30
     gpu_mem = (torch.cuda.mem_get_info()[1] - torch.cuda.mem_get_info()[0]) / 2**30
 
+
+    # Define the handler global flag to indicate interruption
+    stop_flag = False
+    def handle_sigint(signum, frame):
+        nonlocal stop_flag
+        print("\nSIGINT received! Preparing to stop...")
+        stop_flag = True
+    signal.signal(signal.SIGINT, handle_sigint)
+
     # DEFINE MODELS NAME
     models_folder = os.path.join(os.environ["DATA"], "models")
     os.makedirs(models_folder, exist_ok=True)
-    model_checkpoint = None
-    model_best = None
-    last_error = None
-    
+
     while True:
         for j, batches in enumerate(train_loader):
 
@@ -585,7 +601,8 @@ def main_worker(config: Dict[str, Any], args: argparse.Namespace):
             # Validation
             is_last_step = step >= config["training"]["n_iters"]
             is_validation = step % config["training"]["validation_interval"] == 0
-            if is_last_step or is_validation:
+            stop_training = stop_flag
+            if is_last_step or is_validation or stop_training:
                 torch.cuda.empty_cache()
                 barrier()
                 if is_main_process():
@@ -608,29 +625,37 @@ def main_worker(config: Dict[str, Any], args: argparse.Namespace):
                 if is_main_process():
                     print(f"Elapsed: {format_seconds(int(time() - start_validation))}")
 
-                    # SAVE MODEL PARAMETERS
-                    # current_error = metrics["IBims"]["arel"]
-                    #if last_error == None or current_error <= last_error:
-                    #    if model_best and os.path.exists(model_best):
-                    #        os.remove(model_best)
-                    #    last_error = current_error
-                    #    model_best = os.path.join(models_folder, f'unidepth_best_{dt.now().strftime("%Y-%m-%d_%H-%M-%S")}.pth')
-                    #    torch.save(ddp_model.state_dict(), model_best)
-                    #    print(f"Saving best model: {model_best}")
-                    if model_checkpoint and os.path.exists(model_checkpoint):
-                        os.remove(model_checkpoint)
-                    model_checkpoint = os.path.join(models_folder, f'unidepth_checkpoint_{dt.now().strftime("%Y-%m-%d_%H-%M-%S")}.pth')
-                    torch.save(ddp_model.state_dict(), model_checkpoint)
-                    print(f"Saving checkpoint: {model_checkpoint}")
-
-
                 ddp_model.train()
                 torch.cuda.empty_cache()
 
-            if step >= config["training"]["n_iters"]:
+            if stop_training or stop_training:
+
+                if is_main_process():
+
+                    print(f"Saving checkpoint...")
+
+                    # Get path on temporary folder
+                    temp_folder = os.path.join(os.environ["CACHE"], "temp")
+                    model_checkpoint = os.path.join(models_folder, f'unidepth_checkpoint_{dt.now().strftime("%Y-%m-%d_%H-%M-%S")}.pth')
+                    path = os.path.join(temp_folder, model_checkpoint)  
+
+                    # Save model to disk
+                    torch.save(ddp_model.state_dict(), path)
+                    print(f"Saved model to: {path}")
+
+                    # Log artifact
+                    run = getAimRun()
+                    run.log_artifact(path, name="unidepth.pth")
+
+                    # Delete file
+                    os.remove(path)
+
+    
                 if is_main_process() and track_pbar:
                     pbar.close()
+
                 wandb.finish(0)
+                getAimRun().close()
                 dist.destroy_process_group()
                 return 0
 
