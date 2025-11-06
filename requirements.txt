@@ -87,4 +87,3 @@ e3nn
 json5
 torchviz
 aim
-tensorboard
