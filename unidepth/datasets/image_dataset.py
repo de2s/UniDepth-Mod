@@ -152,7 +152,8 @@ class ImageDataset(BaseDataset):
 
         results = self.replicate(results)
         for i, seq in enumerate(results["sequence_fields"]):
-            print(self.__class__.__name__, i, seq, results[seq].keys())
+            if self.test_mode:
+                print(self.__class__.__name__, i, seq, results[seq].keys())
             self.resizer.ctx = None
             results[seq] = self.resizer(results[seq])
             num_pts = torch.count_nonzero(results[seq]["depth"] > 0)
