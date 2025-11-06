@@ -162,9 +162,24 @@ class SequenceDataset(BaseDataset):
         
         elif self.sampling_mode == "neighboor":
 
-            # Get the first index
-            idx1 = np.random.randint(0, num_samples_sequence - self.sampling_window_size)
-            idx2 = np.random.randint(idx1 + 1, idx1 + self.sampling_window_size)
+            if num_samples_sequence < 2 or self.sampling_window_size < 1:
+                raise ValueError("Cannot pick two distinct samples under these conditions.")
+
+            idx1 = np.random.randint(num_samples_sequence)
+
+            # Number of possible candidates excluding i itself
+            low = max(0, idx1 - self.sampling_window_size)
+            high = min(num_samples_sequence - 1, idx1 + self.sampling_window_size)
+            num_candidates = high - low
+
+            if num_candidates == 0:
+                raise ValueError("No valid pair found (check N and L values).")
+
+            offset = np.random.randint(num_candidates)
+            if low + offset >= idx1:
+                offset += 1  # skip idx1
+            idx2 = low + offset
+
             indices = [idx1, idx2]
             return indices, np.random.randint(0, len(indices)) # TODO: This is where `frame_idx` is created. Maybe we should always return 0?
         
@@ -205,10 +220,26 @@ class SequenceDataset(BaseDataset):
     
         elif self.sampling_mode == "neighboor":
 
-            # Get the first index
-            idx1 = np.random.randint(0, num_samples_sequence - self.sampling_window_size)
-            idx2 = np.random.randint(idx1 + 1, idx1 + self.sampling_window_size)
+            if num_samples_sequence < 2 or self.sampling_window_size < 1:
+                raise ValueError("Cannot pick two distinct samples under these conditions.")
+
+            idx1 = np.random.randint(num_samples_sequence)
+
+            # Number of possible candidates excluding i itself
+            low = max(0, idx1 - self.sampling_window_size)
+            high = min(num_samples_sequence - 1, idx1 + self.sampling_window_size)
+            num_candidates = high - low
+
+            if num_candidates == 0:
+                raise ValueError("No valid pair found (check N and L values).")
+
+            offset = np.random.randint(num_candidates)
+            if low + offset >= idx1:
+                offset += 1  # skip idx1
+            idx2 = low + offset
+
             indices = [idx1, idx2]
+
             return indices, np.random.randint(0, len(indices))
         
         else:
@@ -222,7 +253,7 @@ class SequenceDataset(BaseDataset):
         h5_path = os.path.join(self.data_root, self.hdf5_paths[chunk_idx])
 
         num_samples_sequence = len(sample["image"])
-        if self.num_frames > 0 and num_samples_sequence < self.num_frames:
+        if self.num_frames > 1 and num_samples_sequence < self.num_frames:
             raise IndexError(f"Sequence {idx} has less than {self.num_frames} frames")
         keyframe_idx = None
 
@@ -292,6 +323,8 @@ class SequenceDataset(BaseDataset):
     def preprocess(self, results):
         results = self.replicate(results)
         for i, seq in enumerate(results["sequence_fields"]):
+            if self.test_mode:
+                print(self.__class__.__name__, i, seq, results[seq].keys())
             results[seq] = self.resizer(results[seq])
             self.resizer.ctx = None if self.num_copies > 1 else self.resizer.ctx
             num_pts = torch.count_nonzero(results[seq]["depth"] > 0)
