@@ -6,7 +6,7 @@
     "training":{
       "n_iters": 300000,
       "validation_interval": 1000,
-      "log_train_metrics_interval": 50,
+      "log_train_metrics_interval": 100,
        "batch_size":8,
        "nsteps_accumulation_gradient":2,
       "pretrained": "/unidepth/cache/models/pretrained/unidepth_v1_pytorch_model.bin",
@@ -17,7 +17,7 @@
        "cycle_beta":false,
        "wd":0.1,
        "wd_final":0.1,
-       "warmup_iters":75000,
+      "warmup_iters": 30000,
        "ld":1.0,
        "drop_path":0.0,
        "ema":true,
@@ -91,7 +91,6 @@
          "HOI4D": 1.0,
          "KITTIMulti": 1.0,
          "MatrixCity": 1.0,
-         "MegaDepthS": 1.0,
          "MidAir": 1.0,
          "MIP": 1.0,
          "MVImgNet": 1.0,
@@ -131,7 +130,6 @@
          "HOI4D": 10,
          "KITTIMulti": 10,
          "MatrixCity": 10,
-         "MegaDepthS": 10,
          "MidAir": 10,
          "MIP": 10,
          "MVImgNet": 10,
@@ -162,47 +160,44 @@
        },
        "train_datasets":[
          // Sequence datasets from UniDepth
-         "Argoverse2",
-         "ScanNet",
-         "Waymo",         
+         "Argoverse2",        // Used in validation (train/test)
+         "ScanNet",           // Used in validation (train/test)
+         "Waymo",             // Used in validation (train/test)
          // Available sequence datasets
-         "ADT",
-         "Argoverse2",
+         // "ADT",
          "ARKit",
-         "ASE",
-         "BEDLAM",
-         "BlendedMVG",
-         "DTURMVD",
-         "DynReplica",
-         "EDEN",
-         "FaceDepth",
+         // "ASE",
+         // "BEDLAM",
+         // "BlendedMVG",     // Used in validation (Zero Shot)
+         // "DTURMVD",        // Used in validation (Zero Shot)
+         // "DynReplica",
+         // "EDEN",
+         // "FaceDepth",
          "HM3D",
          "HOI4D",
-         "KITTIMulti",
-         "MatrixCity",
-         "MegaDepthS",
-         "MidAir",
-         "MIP",
+         // "KITTIMulti",     // Used in validation (Zero Shot)
+         // "MatrixCity",
+         // "MidAir",
+         // "MIP",
          "MVImgNet",
-         "MVSynth",
+         // "MVSynth",
          "NeRDS360",
          "NianticMapFree",
-         "PointOdyssey",
-         "ScanNet",
-         "ScanNetpp",
-         "Sintel",
-         "TartanAir",
-         "TATRMVD",
-         "Theo",
-         "UnrealStereo4K",
-         "Waymo",
+         // "PointOdyssey",
+         // "ScanNetpp",
+         // "Sintel",
+         //"TartanAir",
+         // "TATRMVD",        // Used in validation (Zero Shot)
+         // "Theo",
+         // "UnrealStereo4K",
          "WildRGBD",
          // Still unavailable
-         // "Deep360",           // Error: Unexpected keyword argument 'test_mode'
-         // "FutureHouse",       // Error: Unexpected keyword argument 'test_mode'
-         // "Gibson",            // Error: Unexpected keyword argument 'test_mode'
+         // "Deep360",           // Error: Unexpected keyword argument 'test_mode' in PanoRoll method
+         // "FutureHouse",       // Error: Unexpected keyword argument 'test_mode' in PanoRoll method
+         // "Gibson",            // Error: Unexpected keyword argument 'test_mode' in PanoRoll method
          // "KITTI360",          // Warning: Generates a lot of NaN gradients
-         // "Matterport3D",      // Error: Unexpected keyword argument 'test_mode'
+         // "Matterport3D",      // Error: Unexpected keyword argument 'test_mode' in PanoRoll method
+         // "MegaDepthS",        // Warning: Sequences contain images with multiple resolutions causing multiple errors.
          // "MS2",               // Error: Invalid rotation matrixes
          // "ScanNetpp_F",       // Warning: Sequences need to be reordered 
        ],
@@ -224,10 +219,9 @@
          "Waymo",
          // New sequence datasets (zero shot)
          "KITTIMulti",
-         "MegaDepthS",
          "BlendedMVG",
          "DTURMVD",
-         "TATRMVD"
+         "TATRMVD",
        ],
        "data_root":"datasets",
        "crop":"garg",
