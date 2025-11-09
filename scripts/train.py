@@ -231,7 +231,7 @@ def main_worker(config: Dict[str, Any], args: argparse.Namespace):
             tags=None,
             notes=notes,
             dir=os.environ.get("WANDB_HOME", os.environ.get("TMPDIR", "/tmp")),
-            mode="disabled" if "DEBUG" in os.environ else None,
+            mode="disabled" if "DEBUG" in os.environ or "NOLOG" in os.environ else None,
         )
         wandb.watch(model)
 
