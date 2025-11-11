@@ -12,8 +12,15 @@ _*.sh
 unidepth.egg-info
 
 # cache files
-/cache/
+cache/
 
 # vscode files
-/.vscode/
-/.devcontainer/
+.vscode/
+.devcontainer/*
+
+# Except sample configurations
+!.devcontainer/devcontainer.json.sample
+!.devcontainer/docker-compose.yml.sample
+
+# docker compose
+docker-compose.yaml

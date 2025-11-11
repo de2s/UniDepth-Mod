@@ -1,0 +1,22 @@
+services:
+  unidepth-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        USER_UID: 1000
+        USER_GID: 1000
+    container_name: unidepth-dev
+    ports:
+      - "43800:43800"
+    volumes:
+      - /home/dsalgado/Volumes/unidepth-dev-data:/data
+      - /mnt/data/datasets:/data/datasets
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+      
