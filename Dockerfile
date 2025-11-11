@@ -8,7 +8,7 @@ ARG USER_GID=1000
 
 # Install OS requirements
 RUN apt update \
-    && DEBIAN_FRONTEND=noninteractive apt install -y sudo git python3-opencv
+    && DEBIAN_FRONTEND=noninteractive apt install -y sudo git python3-opencv screen
 
 # Install Python requirements
 WORKDIR /unidepth
