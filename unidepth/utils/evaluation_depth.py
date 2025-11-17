@@ -105,6 +105,9 @@ def filter_by_occupancy_grid_iou(tensor1, tensor2, num_div=100.0, dilate=1):
     grid_max = torch.max(max1, max2)
     voxel_size = torch.dist(grid_max, grid_min) / num_div
 
+    if voxel_size == 0:
+        return None, None
+
     # 2. Convert points to voxel indices
     def points_to_voxels(points):
         indices = ((points - grid_min) / voxel_size).long()
@@ -143,7 +146,7 @@ def consistency(tensor1, tensor2): #Shapes: torch.Size([307200, 3]), torch.Size(
     tensor1, tensor2 = filter_by_occupancy_grid_iou(tensor1, tensor2, num_div=100, dilate=1)
 
     # Fallback if no points survived (avoid empty Chamfer distance)
-    if tensor1.shape[0] == 0 or tensor2.shape[0] == 0:
+    if tensor1 == None or tensor2 == None or tensor1.shape[0] == 0 or tensor2.shape[0] == 0:
         return None
     
     tensor1 = tensor1.unsqueeze(0)
