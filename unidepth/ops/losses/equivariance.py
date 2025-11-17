@@ -110,7 +110,7 @@ class EqSelfDistill(nn.Module):
         vox_ious = torch.cat([t.unsqueeze(0) for t in vox_ious], dim=0); vox_ioas = torch.cat([t.unsqueeze(0) for t in vox_ioas], dim=0); vox_iobs = torch.cat([t.unsqueeze(0) for t in vox_iobs], dim=0)
         print(f"IOU: {vox_ious}")
 
-        # Log input point cloud REMOVE TEMPORARY
+        # Log input point cloud
         if should_log:
             metrics["BoxIntersectionOverUnionSample"] = box_ious[0]
             metrics["VoxIntersectionOverUnionSample"] = vox_ious[0]

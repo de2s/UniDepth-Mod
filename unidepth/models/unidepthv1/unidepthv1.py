@@ -118,7 +118,7 @@ class UniDepthV1(
     def forward(self, inputs, image_metas, log=False, step=None):
         rgbs = inputs["image"]
 
-        # Check if this method should log artifacts
+        # Check if it should log artifacts
         if log: assert step is not None
         # Log input artifacts with Aim
         if log:

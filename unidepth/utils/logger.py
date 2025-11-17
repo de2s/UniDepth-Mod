@@ -13,10 +13,10 @@ matplotlib.use('Agg')
 # Logger singleton instance
 _aim_run = None
 
-def getAimRun():
+def getAimRun(run_hash=None):
     global _aim_run
     if _aim_run is None:
-        _aim_run = Run(experiment="unidepth", repo="/data/aim")
+        _aim_run = Run(experiment="unidepth", repo="/data/aim", run_hash=run_hash)
         _aim_run.set_artifacts_uri("file:///data/aim/artifacts")
     return _aim_run
 

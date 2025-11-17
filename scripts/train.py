@@ -39,7 +39,8 @@ from unidepth.utils.ema_torch import (DummyExponentialMovingAverage,
                                       ExponentialMovingAverage)
 from unidepth.utils.misc import calculate_mean_values, format_seconds, profile_method, profile_context
 from unidepth.utils.validation import validate
-from unidepth.utils import getAimRun
+from unidepth.utils import getAimRun, load_checkpoint, save_checkpoint
+
 
 
 
@@ -172,6 +173,39 @@ def main_worker(config: Dict[str, Any], args: argparse.Namespace):
             if is_main_process():
                 print("Could not load optimizer state dict:", e)
         
+    # SCHEDULERS
+    scheduler_wd = CosineScheduler(
+        optimizer,
+        key="weight_decay",
+        init_value=config["training"]["wd"],
+        base_value=config["training"]["wd"],
+        final_value=config["training"]["wd_final"],
+        warmup_iters=0,
+        total_iters=config["training"]["n_iters"],
+        #step_init=step - 1,
+    )
+    scheduler_lr = CosineScheduler(
+        optimizer,
+        key="lr",
+        init_value=config["training"]["lr"] * config["training"].get("lr_warmup", 1.0),
+        final_value=config["training"]["lr_final"],
+        warmup_iters=config["training"]["warmup_iters"],
+        total_iters=config["training"]["n_iters"],
+        #step_init=step - 1,
+    )
+    scheduler_betas = CosineScheduler(
+        optimizer,
+        key="betas",
+        init_value=0.95 if config["training"].get("cycle_betas", True) else 0.9,
+        base_value=0.85 if config["training"].get("cycle_betas", True) else 0.9,
+        final_value=0.95 if config["training"].get("cycle_betas", True) else 0.9,
+        warmup_iters=config["training"]["warmup_iters"],
+        total_iters=config["training"]["n_iters"],
+        #step_init=step - 1,
+    )
+
+    # Check if a model checkpoint exist
+    step, run_id, run_hash = load_checkpoint(ddp_model, optimizer, step) # scheduler_wd, scheduler_lr, scheduler_betas
 
     # EMA
     ema_class = (
@@ -198,9 +232,11 @@ def main_worker(config: Dict[str, Any], args: argparse.Namespace):
     batch_size = config["training"]["batch_size"] // (config["data"]["num_copies"] * config["data"]["num_frames"])
 
     is_shell = int(os.environ.get("SHELL_JOB", 0))
-    run_id = sync_string_across_gpus(
-        [f"{dt.now().strftime('%d-%h_%H-%M')}-{uuid.uuid4()}"], device
-    )[0]
+    # TODO: NOT SURE IF THIS WOULD  WORK ON DISTRIBUTED TRAINING
+    if not run_id:
+        run_id = sync_string_across_gpus(
+            [f"{dt.now().strftime('%d-%h_%H-%M')}-{uuid.uuid4()}"], device
+        )[0]
 
     if not is_shell and is_main_process():
         repo_folder = os.path.dirname(os.path.realpath(__file__))
@@ -236,7 +272,7 @@ def main_worker(config: Dict[str, Any], args: argparse.Namespace):
         wandb.watch(model)
 
         # Initialize Aim logger and save unidepth run configuration
-        run = getAimRun()
+        run = getAimRun(run_hash)
         run['hparams'] = config
 
     ##############################
@@ -356,37 +392,6 @@ def main_worker(config: Dict[str, Any], args: argparse.Namespace):
         )
         for name_dataset, dataset in val_datasets.items()
     }
-
-    # SCHEDULERS
-    scheduler_wd = CosineScheduler(
-        optimizer,
-        key="weight_decay",
-        init_value=config["training"]["wd"],
-        base_value=config["training"]["wd"],
-        final_value=config["training"]["wd_final"],
-        warmup_iters=0,
-        total_iters=config["training"]["n_iters"],
-        step_init=step - 1,
-    )
-    scheduler_lr = CosineScheduler(
-        optimizer,
-        key="lr",
-        init_value=config["training"]["lr"] * config["training"].get("lr_warmup", 1.0),
-        final_value=config["training"]["lr_final"],
-        warmup_iters=config["training"]["warmup_iters"],
-        total_iters=config["training"]["n_iters"],
-        step_init=step - 1,
-    )
-    scheduler_betas = CosineScheduler(
-        optimizer,
-        key="betas",
-        init_value=0.95 if config["training"].get("cycle_betas", True) else 0.9,
-        base_value=0.85 if config["training"].get("cycle_betas", True) else 0.9,
-        final_value=0.95 if config["training"].get("cycle_betas", True) else 0.9,
-        warmup_iters=config["training"]["warmup_iters"],
-        total_iters=config["training"]["n_iters"],
-        step_init=step - 1,
-    )
 
     # Set loss scaler for half precision training + sanity zeroing grads
     # dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
@@ -524,9 +529,9 @@ def main_worker(config: Dict[str, Any], args: argparse.Namespace):
             scaler.step(optimizer)
             scaler.update()
 
-            scheduler_wd.step()
-            scheduler_lr.step()
-            scheduler_betas.step()
+            scheduler_wd.step(step)
+            scheduler_lr.step(step)
+            scheduler_betas.step(step)
 
             # Log gradients before they are deleted
             if step % config["training"]["log_train_metrics_interval"] == 0 and is_main_process():
@@ -606,7 +611,7 @@ def main_worker(config: Dict[str, Any], args: argparse.Namespace):
 
             # Validation
             is_last_step = step >= config["training"]["n_iters"]
-            is_validation = step % config["training"]["validation_interval"] == 0
+            is_validation = step % (config["training"]["validation_interval"] // 10) == 0 if step <= config["training"]["n_iters"] // 10 else step % config["training"]["validation_interval"] == 0
             stop_training = stop_flag
             if is_last_step or is_validation or stop_training:
                 torch.cuda.empty_cache()
@@ -627,6 +632,9 @@ def main_worker(config: Dict[str, Any], args: argparse.Namespace):
 
                 # Restore random number generator state
                 np.random.set_state(np_rng_state)
+
+                # Save model checkpoint
+                save_checkpoint(ddp_model, optimizer, step, run_id, getAimRun().hash) # scheduler_wd, scheduler_lr, scheduler_betas
 
                 if is_main_process():
                     print(f"Elapsed: {format_seconds(int(time() - start_validation))}")

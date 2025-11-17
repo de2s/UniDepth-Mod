@@ -69,10 +69,10 @@ class CosineScheduler(object):
         init_value=None,
         base_value=None,
         final_value=None,
-        step_init=-1,
+        # step_init=-1,
     ):
         super().__init__()
-        self.iter = step_init
+        # self.iter = step_init
         self.overwrite = overwrite
         self.optimizer = optimizer
         self.base_value = base_value
@@ -106,9 +106,9 @@ class CosineScheduler(object):
         )
         return np.concatenate((warmup_schedule, schedule))
 
-    def step(self):
-        self.iter = self.iter + 1
-        vals = self[self.iter]
+    def step(self, step):
+        # self.iter = self.iter + 1
+        vals = self[step] # vals = self[self.iter]
         for group, val in zip(self.optimizer.param_groups, vals):
             if isinstance(group[self.key], (tuple, list)):
                 val = (val, *group[self.key][1:])
