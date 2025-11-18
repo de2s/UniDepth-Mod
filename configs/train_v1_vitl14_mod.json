@@ -10,6 +10,7 @@
        "batch_size":8,
        "nsteps_accumulation_gradient":2,
       "pretrained": "/unidepth/cache/models/pretrained/unidepth_v1_pytorch_model.bin",
+      "checkpoint_interval": 1000,
        "use_checkpoint":false,
        "lr":1e-4,
        "lr_final":1e-6,

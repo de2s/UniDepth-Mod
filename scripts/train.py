@@ -633,16 +633,18 @@ def main_worker(config: Dict[str, Any], args: argparse.Namespace):
                 # Restore random number generator state
                 np.random.set_state(np_rng_state)
 
-                # Save model checkpoint
-                save_checkpoint(ddp_model, optimizer, step, run_id, getAimRun().hash) # scheduler_wd, scheduler_lr, scheduler_betas
-
                 if is_main_process():
                     print(f"Elapsed: {format_seconds(int(time() - start_validation))}")
 
                 ddp_model.train()
                 torch.cuda.empty_cache()
 
-            if stop_training or stop_training:
+            # Save model checkpoint
+            if step % config["training"]["checkpoint_interval"] == 0 and is_last_step == False:
+                save_checkpoint(ddp_model, optimizer, step, run_id, getAimRun().hash)
+
+
+            if is_last_step or stop_training:
 
                 if is_main_process():
 
