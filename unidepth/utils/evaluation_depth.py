@@ -135,6 +135,10 @@ def filter_by_occupancy_grid_iou(tensor1, tensor2, num_div=100.0, dilate=1):
     mask1 = intersection[vox1[:,0], vox1[:,1], vox1[:,2]]
     mask2 = intersection[vox2[:,0], vox2[:,1], vox2[:,2]]
     
+    # Return none if all points are masked out
+    if mask1.sum() == 0 or mask2.sum() == 0:
+        return None, None
+    
     tensor1 = tensor1[mask1]
     tensor2 = tensor2[mask2]
     
