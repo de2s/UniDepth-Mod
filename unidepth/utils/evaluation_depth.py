@@ -140,7 +140,20 @@ def filter_by_occupancy_grid_iou(tensor1, tensor2, num_div=100.0, dilate=1):
     
     return tensor1, tensor2
 
-def consistency(tensor1, tensor2): #Shapes: torch.Size([307200, 3]), torch.Size([307200, 3])
+def consistency(tensors, masks=None): #Shapes: torch.Size([307200, 3]), torch.Size([307200, 3])
+
+    # Check dimensions
+    assert tensors.shape[0] == 2
+    if masks is not None:
+        assert masks.shape[0] == 2
+
+    # Filter masked points if mask is provided
+    tensor1 = tensors[0][masks[0]] if masks is not None else tensors[0]
+    tensor2 = tensors[1][masks[1]] if masks is not None else tensors[1]
+
+    # Fallback if no points survived (avoid empty Chamfer distance)
+    if tensor1.shape[0] == 0 or tensor2.shape[0] == 0:
+        return None
 
     # Filter points that are not registered in both images
     tensor1, tensor2 = filter_by_occupancy_grid_iou(tensor1, tensor2, num_div=100, dilate=1)
@@ -192,7 +205,9 @@ DICT_METRICS_D = {
 }
 
 DICT_METRICS_SEQUENCE = {
-    "consistency": lambda pred1, pred2: consistency(pred1, pred2),
+    "gts_consistency": lambda gts, pred, mask: consistency(gts, mask),
+    "pred_consistenc_masked": lambda gts, pred, mask: consistency(pred, mask),
+    "pred_consistency_unmasked": lambda gts, pred, mask: consistency(pred),
 }
 
 def eval_depth(
@@ -236,24 +251,31 @@ def eval_3d(
     return {name: torch.stack(vals, dim=0) for name, vals in summary_metrics.items()}
 
 def eval_sequence(
+    gts: torch.Tensor,
+    preds: torch.Tensor,
+    masks: torch.Tensor,
     cam2ws: torch.Tensor, 
-    preds: torch.Tensor
 ):
-    assert  preds.shape[0] == 2 and preds.shape[0] == cam2ws.shape[0]
+    assert  gts.shape[0] == 2 and preds.shape[0] == 2 and masks.shape[0] and cam2ws.shape[0] == 2
 
     # Transform to global coordinates
     preds_flat = rearrange(preds, "b c h w -> b (h w) c")
+    gts_flat = rearrange(gts, "b c h w -> b (h w) c")
+    masks_flat = rearrange(masks, "b c h w -> b (h w) c").squeeze(-1)
     B, N, _ = preds_flat.shape
     ones = torch.ones(B, N, 1, device=preds_flat.device)
+    gts_flat = torch.cat([gts_flat, ones], dim=-1)
+    gts_flat = torch.bmm(cam2ws, gts_flat.transpose(-2, -1))
+    gts_flat = gts_flat.permute(0, 2, 1)[:, :, :3]
     preds_flat = torch.cat([preds_flat, ones], dim=-1)
     preds_flat = torch.bmm(cam2ws, preds_flat.transpose(-2, -1))
     preds_flat = preds_flat.permute(0, 2, 1)[:, :, :3]
-    
+     
     # Calculate metrics
     summary_metrics = defaultdict(list)
 
     for name, fn in DICT_METRICS_SEQUENCE.items():
-        value = fn(preds_flat[0], preds_flat[1])
+        value = fn(gts_flat, preds_flat, masks_flat)
         if value: summary_metrics[name].append(value.mean())
 
     return {name: torch.stack(vals, dim=0) for name, vals in summary_metrics.items()}

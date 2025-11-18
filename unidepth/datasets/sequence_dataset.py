@@ -382,11 +382,15 @@ class SequenceDataset(BaseDataset):
     def prepare_consistency_eval(self, inputs, preds):
         new_preds = {}
         cam2ws = inputs["cam2w"]
+        new_gts = inputs["points"]
+        new_masks = inputs["depth_mask"].bool()
+        if "points_mask" in inputs:
+            new_masks = inputs["points_mask"].bool()
         for key, val in preds.items():
             if "points" in key:
                 new_preds[key] = val
-        return cam2ws, new_preds  
-    
+        return new_gts, new_preds, new_masks, cam2ws
+
     @torch.autocast(device_type="cuda", enabled=False, dtype=torch.float32)
     def accumulate_metrics(
         self,
@@ -403,17 +407,22 @@ class SequenceDataset(BaseDataset):
 
         # Compute sequence metrics only when it is a sequence dataset
         if "cam2w" in available_metrics and keyframe_idx is not None:
-            cam2ws, preds = self.prepare_consistency_eval(inputs, preds) # TODO: Include `keyframe_idx` to compute consystency between more than two frames
-            self.accumulate_metrics_sequence(cam2ws, preds)
+            point_gts, point_preds, points_masks, cam2ws = self.prepare_consistency_eval(inputs, preds) # TODO: Include `keyframe_idx` to compute consystency between more than two frames
+            self.accumulate_metrics_sequence(point_gts, point_preds, points_masks, cam2ws)
     
     @torch.autocast(device_type="cuda", enabled=False, dtype=torch.float32)
-    def accumulate_metrics_sequence(self, cam2ws, preds):
+    def accumulate_metrics_sequence(self, gts, preds, masks, cam2ws):
         for eval_type, pred in preds.items():
             log_name = eval_type.replace("points", "").strip("-").strip("_")
             if log_name not in self.metrics_store:
                 self.metrics_store[log_name] = {}
-            
-            for k, v in eval_sequence(cam2ws, pred).items():
+            # self.metrics_count is not being used, so here it's not computed
+            # current_count = self.metrics_count.get(
+            #    log_name, torch.tensor([], device=gts.device)
+            # )
+            # new_count = masks.view(gts.shape[0], -1).sum(dim=-1)
+            # self.metrics_count[log_name] = torch.cat([current_count, new_count])
+            for k, v in eval_sequence(gts, pred, masks, cam2ws).items(): # TODO: RIGHT DIMENSIONS???
                 current_metric = self.metrics_store[log_name].get(
                     k, torch.tensor([], device=cam2ws.device)
                 )
