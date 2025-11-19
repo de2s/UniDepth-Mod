@@ -105,7 +105,9 @@ def filter_by_occupancy_grid_iou(tensor1, tensor2, num_div=100.0, dilate=1):
     grid_max = torch.max(max1, max2)
     voxel_size = torch.dist(grid_max, grid_min) / num_div
 
-    if voxel_size == 0:
+    EPS = 1e-8
+    if voxel_size < EPS:
+        print(f"Voxel size close to zero: {voxel_size}")
         return None, None
 
     # 2. Convert points to voxel indices
@@ -118,25 +120,43 @@ def filter_by_occupancy_grid_iou(tensor1, tensor2, num_div=100.0, dilate=1):
     
     # 3. Create occupancy grids
     grid_size = ((grid_max - grid_min) / voxel_size).ceil().long()
+    if (grid_size == 0).any():
+        print(f"Empty grid size: {grid_size}")
+        return None, None
+    
+    if (vox1.min(dim=0)[0] < 0).any() or ((grid_size - vox1.max(dim=0)[0]) <= 0).any() or (vox2.min(dim=0)[0] < 0).any() or ((grid_size - vox2.max(dim=0)[0]) <= 0).any():
+        print(f"Voxel indices outside gridsize range:")
+        print(f"gridsize: {grid_size}")
+        print(f"vox1: {vox1.min(dim=0)[0]} - {vox1.max(dim=0)[0]}")
+        print(f"vox1: {vox2.min(dim=0)[0]} - {vox2.max(dim=0)[0]}")
+        return None, None
+    
     occ1 = torch.zeros(grid_size.tolist(), dtype=torch.bool, device=tensor1.device)
     occ2 = torch.zeros(grid_size.tolist(), dtype=torch.bool, device=tensor1.device)
     
-    occ1[vox1[:,0], vox1[:,1], vox1[:,2]] = 1
-    occ2[vox2[:,0], vox2[:,1], vox2[:,2]] = 1
+    occ1[vox1[:,0], vox1[:,1], vox1[:,2]] = True
+    occ2[vox2[:,0], vox2[:,1], vox2[:,2]] = True
    
     # 4. Dilate occupancy grids by 1 voxel using max pooling (cheaper than conv)
     kernel_size = 2 * dilate + 1
     if kernel_size > 1:
-        occ1 = F.max_pool3d(occ1[None, None].float(), kernel_size=kernel_size, stride=1, padding=1)[0, 0].bool()
-        occ2 = F.max_pool3d(occ2[None, None].float(), kernel_size=kernel_size, stride=1, padding=1)[0, 0].bool()
+        occ1 = F.max_pool3d(occ1[None, None].float(), kernel_size=kernel_size, stride=1, padding=dilate)[0, 0].bool()
+        occ2 = F.max_pool3d(occ2[None, None].float(), kernel_size=kernel_size, stride=1, padding=dilate)[0, 0].bool()
     
     # 6. Filter points based on intersection of occupancy gri
     intersection = occ1 & occ2
+    if intersection.sum() == 0:
+        print("Empty intersection")
+        return None, None
+
     mask1 = intersection[vox1[:,0], vox1[:,1], vox1[:,2]]
     mask2 = intersection[vox2[:,0], vox2[:,1], vox2[:,2]]
     
     # Return none if all points are masked out
     if mask1.sum() == 0 or mask2.sum() == 0:
+        print(f"Empty mask:")
+        print(f"Mask1: {mask1.sum()}")
+        print(f"Mask2: {mask1.sum()}")
         return None, None
     
     tensor1 = tensor1[mask1]
