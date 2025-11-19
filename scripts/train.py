@@ -173,39 +173,8 @@ def main_worker(config: Dict[str, Any], args: argparse.Namespace):
             if is_main_process():
                 print("Could not load optimizer state dict:", e)
         
-    # SCHEDULERS
-    scheduler_wd = CosineScheduler(
-        optimizer,
-        key="weight_decay",
-        init_value=config["training"]["wd"],
-        base_value=config["training"]["wd"],
-        final_value=config["training"]["wd_final"],
-        warmup_iters=0,
-        total_iters=config["training"]["n_iters"],
-        #step_init=step - 1,
-    )
-    scheduler_lr = CosineScheduler(
-        optimizer,
-        key="lr",
-        init_value=config["training"]["lr"] * config["training"].get("lr_warmup", 1.0),
-        final_value=config["training"]["lr_final"],
-        warmup_iters=config["training"]["warmup_iters"],
-        total_iters=config["training"]["n_iters"],
-        #step_init=step - 1,
-    )
-    scheduler_betas = CosineScheduler(
-        optimizer,
-        key="betas",
-        init_value=0.95 if config["training"].get("cycle_betas", True) else 0.9,
-        base_value=0.85 if config["training"].get("cycle_betas", True) else 0.9,
-        final_value=0.95 if config["training"].get("cycle_betas", True) else 0.9,
-        warmup_iters=config["training"]["warmup_iters"],
-        total_iters=config["training"]["n_iters"],
-        #step_init=step - 1,
-    )
-
     # Check if a model checkpoint exist
-    step, run_id, run_hash = load_checkpoint(ddp_model, optimizer, step) # scheduler_wd, scheduler_lr, scheduler_betas
+    step, wandb_run_id, wandb_run_name, aim_run_hash = load_checkpoint(ddp_model, optimizer, step) # scheduler_wd, scheduler_lr, scheduler_betas
 
     # EMA
     ema_class = (
@@ -233,8 +202,8 @@ def main_worker(config: Dict[str, Any], args: argparse.Namespace):
 
     is_shell = int(os.environ.get("SHELL_JOB", 0))
     # TODO: NOT SURE IF THIS WOULD  WORK ON DISTRIBUTED TRAINING
-    if not run_id:
-        run_id = sync_string_across_gpus(
+    if not wandb_run_name:
+        wandb_run_name = sync_string_across_gpus(
             [f"{dt.now().strftime('%d-%h_%H-%M')}-{uuid.uuid4()}"], device
         )[0]
 
@@ -260,19 +229,22 @@ def main_worker(config: Dict[str, Any], args: argparse.Namespace):
             )
 
         # Initialize Weights & Biases logger
-        wandb.init(
+        wandb_run_id = wandb.init(
+            id=wandb_run_id,
             project="UniDepth",
-            name=run_id,
+            name=wandb_run_name,
             config=config,
             tags=None,
             notes=notes,
             dir=os.environ.get("WANDB_HOME", os.environ.get("TMPDIR", "/tmp")),
             mode="disabled" if "DEBUG" in os.environ or "NOLOG" in os.environ else None,
-        )
+            resume="allow"
+        ).id
         wandb.watch(model)
 
         # Initialize Aim logger and save unidepth run configuration
-        run = getAimRun(run_hash)
+        run = getAimRun(aim_run_hash)
+        aim_run_hash = run.hash
         run['hparams'] = config
 
     ##############################
@@ -392,6 +364,37 @@ def main_worker(config: Dict[str, Any], args: argparse.Namespace):
         )
         for name_dataset, dataset in val_datasets.items()
     }
+
+    # SCHEDULERS
+    scheduler_wd = CosineScheduler(
+        optimizer,
+        key="weight_decay",
+        init_value=config["training"]["wd"],
+        base_value=config["training"]["wd"],
+        final_value=config["training"]["wd_final"],
+        warmup_iters=0,
+        total_iters=config["training"]["n_iters"],
+        #step_init=step - 1,
+    )
+    scheduler_lr = CosineScheduler(
+        optimizer,
+        key="lr",
+        init_value=config["training"]["lr"] * config["training"].get("lr_warmup", 1.0),
+        final_value=config["training"]["lr_final"],
+        warmup_iters=config["training"]["warmup_iters"],
+        total_iters=config["training"]["n_iters"],
+        #step_init=step - 1,
+    )
+    scheduler_betas = CosineScheduler(
+        optimizer,
+        key="betas",
+        init_value=0.95 if config["training"].get("cycle_betas", True) else 0.9,
+        base_value=0.85 if config["training"].get("cycle_betas", True) else 0.9,
+        final_value=0.95 if config["training"].get("cycle_betas", True) else 0.9,
+        warmup_iters=config["training"]["warmup_iters"],
+        total_iters=config["training"]["n_iters"],
+        #step_init=step - 1,
+    )
 
     # Set loss scaler for half precision training + sanity zeroing grads
     # dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
@@ -641,7 +644,7 @@ def main_worker(config: Dict[str, Any], args: argparse.Namespace):
 
             # Save model checkpoint
             if step % config["training"]["checkpoint_interval"] == 0 and is_last_step == False:
-                save_checkpoint(ddp_model, optimizer, step, run_id, getAimRun().hash)
+                save_checkpoint(ddp_model, optimizer, step, wandb_run_id, wandb_run_name, aim_run_hash)
 
 
             if is_last_step or stop_training:

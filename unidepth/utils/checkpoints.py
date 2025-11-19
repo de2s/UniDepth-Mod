@@ -8,7 +8,7 @@ from unidepth.utils.distributed import is_main_process
 
 checkpoint_file = os.path.join(os.environ["CACHE"], "checkpoints/unidepth_checkpoint.pth")
 
-def save_checkpoint(model, optimizer, step, wandb_run_id, aim_run_hash): #, , scheduler, step, wandb_id, aim_hash): scheduler_wd, scheduler_lr, scheduler_betas
+def save_checkpoint(model, optimizer, step, wandb_run_id, wandb_run_name, aim_run_hash): #, , scheduler, step, wandb_id, aim_hash): scheduler_wd, scheduler_lr, scheduler_betas
 
     # Create folder if it doesn't exist
     checkpoint_folder = os.path.dirname(checkpoint_file)
@@ -28,6 +28,7 @@ def save_checkpoint(model, optimizer, step, wandb_run_id, aim_run_hash): #, , sc
         "prng_torch_cuda_all": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None,
         "step": step,
         "wandb_run_id": wandb_run_id,
+        "wandb_run_name": wandb_run_name,
         "aim_run_hash": aim_run_hash,
 
     }
@@ -38,7 +39,7 @@ def load_checkpoint(model, optimizer, step): #, optimizer, scheduler): scheduler
 
     # Check if checkpoint exist.
     if not os.path.exists(checkpoint_file):
-        return 0, None, None
+        return 0, None, None, None
 
     # Ask the user to confirm checkpoint loading
     if is_main_process():
@@ -47,7 +48,7 @@ def load_checkpoint(model, optimizer, step): #, optimizer, scheduler): scheduler
             if resp == "y" or resp == "n":
                 break
         if resp == "n":
-                return 0, None, None
+                return 0, None, None, None
 
     # Load tensors
     checkpoint = torch.load(checkpoint_file)
@@ -75,7 +76,8 @@ def load_checkpoint(model, optimizer, step): #, optimizer, scheduler): scheduler
 
     # Load logger run ids
     wandb_run_id = checkpoint.get('wandb_run_id', None)
+    wandb_run_name = checkpoint.get('wandb_run_name', None)
     aim_run_hash = checkpoint.get('aim_run_hash', None)
 
-    return step, wandb_run_id, aim_run_hash
+    return step, wandb_run_id, wandb_run_name, aim_run_hash
 
