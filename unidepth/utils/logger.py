@@ -142,8 +142,9 @@ def save_point_cloud(tag, points, colors):
     buf.write(data_str)
     buf.write("\n")
 
-    # Get path on temporary folder
+    # Get path on temporary folder, create it if needed.
     temp_folder = os.path.join(os.environ["CACHE"], "temp")
+    os.makedirs(temp_folder, exist_ok=True)
     filename = f"{tag.split('/')[-1]}.ply"
     path = os.path.join(temp_folder, filename)  
 
