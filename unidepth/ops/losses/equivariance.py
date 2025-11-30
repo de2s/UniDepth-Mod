@@ -8,6 +8,7 @@ from einops import rearrange
 from aim import Image, Distribution
 from unidepth.utils.geometric import generate_rays, invert_matrix, matrix_to_angles, gather_nearest_patch_center_samples
 from unidepth.utils.logger import getAimRun, log_equivariant_loss_artifacts, save_point_cloud
+from unidepth.utils.visualization import colorize
 from unidepth.ops.metrics import bbox_intersections, voxelized_intersections
 
 from .utils import FNS, masked_mean
@@ -58,7 +59,7 @@ class EqSelfDistill(nn.Module):
         flips: torch.Tensor,
         patch_size=14,
         log = False,
-        step = None
+        step = -1
     ) -> Tuple[torch.Tensor, dict]:
 
         # Copy log variable because this function should only log the first iteration
@@ -227,9 +228,9 @@ class EqSelfDistill(nn.Module):
             feature1_transformed = torch.matmul(change_base, feature1.T).T
             
             # Rotate vectors
-            transformation0 = self.transform_generator.getTransformation(extrinsics0, extrinsics1)
+            transformation0 = self.transform_generator.getTransformation(extrinsics0, extrinsics1, should_log, step)
             feature0_transformed = torch.matmul(transformation0, feature0_transformed.T).T
-            transformation1 = self.transform_generator.getTransformation(extrinsics1, extrinsics0)
+            transformation1 = self.transform_generator.getTransformation(extrinsics1, extrinsics0, should_log, step)
             feature1_transformed = torch.matmul(transformation1, feature1_transformed.T).T
 
             # Revert change of base for the feature vectors
@@ -321,15 +322,15 @@ class GeneratorSO3(nn.Module):
                     "train/equivariance/relative_pose/alpha": alpha,
                     "train/equivariance/relative_pose/beta": beta,
                     "train/equivariance/relative_pose/gamma": gamma,
-                    "train/equivariance/relative_pose/x": pose_rel[:4, :0],
-                    "train/equivariance/relative_pose/y": pose_rel[:4, :1],
-                    "train/equivariance/relative_pose/z": pose_rel[:4, :2]
+                    "train/equivariance/relative_pose/x": pose_rel[0, 3],
+                    "train/equivariance/relative_pose/y": pose_rel[1, 3],
+                    "train/equivariance/relative_pose/z": pose_rel[2, 3],
                 },
                 context={"subset": "train"},
                 step=step
             )
-            run.track(Image(R), name="train/equivariance/rotation_matrix", context={"subset": "train"}, step=step)
-            run.track(Distribution(R), name=f"train/equivariance/rotation_matrix_distribution", context={"subset": "train"}, step=step)
+            run.track(Image(colorize(R.detach().cpu().numpy(), cmap="gray")), name="train/equivariance/rotation_matrix", context={"subset": "train"}, step=step)
+            run.track(Distribution(R.detach().cpu().numpy()), name=f"train/equivariance/rotation_matrix_distribution", context={"subset": "train"}, step=step)
             
         return R
 
@@ -377,16 +378,16 @@ class GeneratorSOn(nn.Module):
                     "train/equivariance/relative_pose/alpha": alpha,
                     "train/equivariance/relative_pose/beta": beta,
                     "train/equivariance/relative_pose/gamma": gamma,
-                    "train/equivariance/relative_pose/x": pose_rel[:4, :0],
-                    "train/equivariance/relative_pose/y": pose_rel[:4, :1],
-                    "train/equivariance/relative_pose/z": pose_rel[:4, :2]
+                    "train/equivariance/relative_pose/x": pose_rel[0, 3],
+                    "train/equivariance/relative_pose/y": pose_rel[1, 3],
+                    "train/equivariance/relative_pose/z": pose_rel[2, 3]
                 },
                 context={"subset": "train"},
                 step=step
             )
-            run.track(Distribution(generator_matrix), name=f"train/equivariance/generator_matrix_distribution", context={"subset": "train"}, step=step)
-            run.track(Distribution(rotation_matrix), name=f"train/equivariance/rotation_matrix_distribution", context={"subset": "train"}, step=step)
-            run.track(Image(rotation_matrix), name="train/equivariance/rotation_matrix", context={"subset": "train"}, step=step)
+            run.track(Distribution(generator_matrix.detach().cpu().numpy()), name=f"train/equivariance/generator_matrix_distribution", context={"subset": "train"}, step=step)
+            run.track(Distribution(rotation_matrix.detach().cpu().numpy()), name=f"train/equivariance/rotation_matrix_distribution", context={"subset": "train"}, step=step)
+            run.track(Image(colorize(rotation_matrix.detach().cpu().numpy(), cmap="gray")), name="train/equivariance/rotation_matrix", context={"subset": "train"}, step=step)
 
         return rotation_matrix
 
