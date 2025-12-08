@@ -6,6 +6,7 @@ import torch.nn.functional as F
 from typing import Tuple
 from einops import rearrange
 from aim import Image, Distribution
+from e3nn.o3 import Irreps
 from unidepth.utils.geometric import generate_rays, invert_matrix, matrix_to_angles, gather_nearest_patch_center_samples
 from unidepth.utils.logger import getAimRun, log_equivariant_loss_artifacts, save_point_cloud
 from unidepth.utils.visualization import colorize
@@ -17,13 +18,13 @@ from .utils import FNS
 
 class EqSelfDistill(nn.Module):
 
-    def __init__(self, weight: float, symmetry_group: str, representation_type: str, feature_dim: int, output_fn: str = "sqrt",  eps: float = 1e-5, change_base: bool = False, inverse_change_base: bool = False, use_gt: bool = True):
+    def __init__(self, weight: float, transform_generation: str, representation_type: str, feature_dim: int, output_fn: str = "sqrt",  eps: float = 1e-5, change_base: bool = False, inverse_change_base: bool = False, use_gt: bool = True):
         super().__init__()
         self.name: str = self.__class__.__name__
         self.weight: float = weight
         self.dims = (-2, -1)
         self.output_fn = FNS[output_fn]
-        self.symmetry_group = symmetry_group
+        self.transform_generation = transform_generation
         self.representation_type = representation_type
         self.feature_dim = feature_dim
         self.change_base = change_base
@@ -40,10 +41,12 @@ class EqSelfDistill(nn.Module):
         else:
             self.register_buffer("change_base_generator", torch.zeros(self.feature_dim,self.feature_dim))
 
-        if self.symmetry_group == "SO(3)":
-            self.transform_generator = GeneratorSO3(representation_type)
-        elif self.symmetry_group == "SO(n)":
-            self.transform_generator = GeneratorSOn(self.feature_dim)
+        if self.transform_generation == "SO(3)->Irreps":
+            self.transform_generator = GeneratorSO3toIrreps(representation_type)
+        elif self.transform_generation == "SO(3)->SO(n)":
+            self.transform_generator = GeneratorSO3toSOn(self.feature_dim)
+        elif self.transform_generation == "Gen->SO(n)":
+            self.transform_generator = GeneratorGtoSOn(self.feature_dim)
 
     @torch.autocast(device_type="cuda", enabled=False, dtype=torch.float32)
     def forward(
@@ -256,7 +259,7 @@ class EqSelfDistill(nn.Module):
             # If Does not contribute to gradients if image pair is skipped
             print("Warning: Empty loss")
             # HACK: Create a zero that stays in the computational graph to avoid exceptions
-            dummy = 0.0
+            dummy = torch.zeros(1, device=device)
             for p in self.parameters():
                 dummy = dummy + (p.sum() * 0.0)
             loss = dummy
@@ -283,7 +286,7 @@ class EqSelfDistill(nn.Module):
     def build(cls, config):
         obj = cls(
             weight=config["weight"],
-            symmetry_group = config["symmetry_group"],
+            transform_generation = config["transform_generation"],
             representation_type = config["representation_type"],
             feature_dim=config["feature_dim"],
             output_fn=config["output_fn"],
@@ -294,7 +297,7 @@ class EqSelfDistill(nn.Module):
         return obj
     
 
-class GeneratorSO3(nn.Module):
+class GeneratorSO3toIrreps(nn.Module):
 
     def __init__(self, representation_type: str):
 
@@ -311,8 +314,8 @@ class GeneratorSO3(nn.Module):
         pose_rel = pose0_inv @ pose1
         
         # Compute the block-diagonal rotation matrix in the irreps space
-        alpha, beta, gamma = matrix_to_angles(pose_rel[:3, :3])
-        R = self.irreps.D_from_angles(alpha, beta, gamma)
+        alpha, beta, gamma = matrix_to_angles(pose_rel[:3, :3].cpu())
+        R = self.irreps.D_from_angles(alpha, beta, gamma).to(pose_rel.device)
 
         # Log relative pose angles and distances
         if log:
@@ -335,13 +338,12 @@ class GeneratorSO3(nn.Module):
         return R
 
 
-class GeneratorSOn(nn.Module):
+class GeneratorSO3toSOn(nn.Module):
 
     def __init__(self, feature_dim):
 
         super().__init__()
         self.feature_dim = feature_dim
-        self.output_dim = feature_dim * (feature_dim - 1) / 2
         self.rotation_decoder = MonotonicAngleDecoder()
 
     def getTransformation(self, pose0: torch.Tensor, pose1: torch.Tensor, log = False, step = -1):
@@ -430,3 +432,34 @@ class MonotonicAngleDecoder(nn.Module):
 
         return x
 
+class GeneratorGtoSOn(nn.Module):
+
+    def __init__(self, feature_dim):
+
+        super().__init__()
+        self.feature_dim = feature_dim
+        self.generator = nn.Parameter(torch.zeros(feature_dim * (feature_dim - 1) // 2))
+
+    def getTransformation(self, pose0: torch.Tensor, pose1: torch.Tensor, log = False, step = -1):
+
+        # Generate rotation matrix
+        generator_matrix = torch.zeros((self.feature_dim, self.feature_dim), device=self.generator .device)
+
+        # Get indices for upper triangle and fill upper and lower parts
+        rows, cols = torch.triu_indices(self.feature_dim, self.feature_dim, offset=1)
+        generator_matrix[rows, cols] = self.generator
+        generator_matrix[cols, rows] = -self.generator
+
+        # Generate rotation matrix
+        rotation_matrix = torch.matrix_exp(generator_matrix)
+
+        # Log relative pose angles and distances
+        if log:
+            run = getAimRun()
+            run.track(Distribution(generator_matrix.detach().cpu().numpy()), name=f"train/equivariance/generator_matrix_distribution", context={"subset": "train"}, step=step)
+            run.track(Distribution(rotation_matrix.detach().cpu().numpy()), name=f"train/equivariance/rotation_matrix_distribution", context={"subset": "train"}, step=step)
+            run.track(Image(colorize(rotation_matrix.detach().cpu().numpy(), cmap="gray")), name="train/equivariance/rotation_matrix", context={"subset": "train"}, step=step)
+
+        return rotation_matrix
+
+    

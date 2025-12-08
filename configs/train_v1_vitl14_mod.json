@@ -57,8 +57,12 @@
              "feature_dim": 512,
              "change_base": false,
              "inverse_change_base": false,
-             "symmetry_group": "SO(n)",
-             "representation_type": "1x0e+1x255e",
+            //"transform_generation": "SO(3)->Irreps",
+            //"transform_generation": "SO(3)->SO(n)",
+            "transform_generation": "Gen->SO(n)", 
+            "representation_type": null,
+            //"representation_type": "512x0e", 
+            //"representation_type": "1x0e+1x255e",
              "use_gt": true
           }
        }
