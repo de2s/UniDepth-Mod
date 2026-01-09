@@ -45,7 +45,7 @@ class EqSelfDistill(nn.Module):
             self.transform_generator = GeneratorSO3toIrreps(representation_type)
         elif self.transform_generation == "SO(3)->SO(n)":
             self.transform_generator = GeneratorSO3toSOn(self.feature_dim)
-        elif self.transform_generation == "Gen->SO(n)":
+        elif self.transform_generation == "Generator->SO(n)":
             self.transform_generator = GeneratorGtoSOn(self.feature_dim)
 
     @torch.autocast(device_type="cuda", enabled=False, dtype=torch.float32)
@@ -53,6 +53,7 @@ class EqSelfDistill(nn.Module):
         self,
         image: torch.Tensor, # Used only for debugging
         feature: torch.Tensor,
+        encoder_features: list,
         depth: torch.Tensor,
         intrinsics: torch.Tensor,
         estimated_depth: torch.Tensor,
@@ -212,7 +213,8 @@ class EqSelfDistill(nn.Module):
                 log_equivariant_loss_artifacts(
                     image0=image0, image1=image1, 
                     mask0=rearrange(mask0, "(h w) -> h w", h=num_patches_y, w=num_patches_x), mask1=rearrange(mask1, "(h w) -> h w", h=num_patches_y, w=num_patches_x), 
-                    feature0=feature0, feature1=feature1, 
+                    feature0=feature0, feature1=feature1,
+                    list_encoder_feature0=None, list_encoder_feature1=None, encoder_feature_indexes=None,
                     points2d0=points2d0, points2d1=points2d1,
                     matches=matches,
                     step = step

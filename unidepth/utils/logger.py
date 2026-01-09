@@ -24,6 +24,7 @@ def log_equivariant_loss_artifacts(
     image0, image1,
     mask0, mask1, 
     feature0, feature1, 
+    list_encoder_feature0, list_encoder_feature1, list_encoder_indexes,
     points2d0, points2d1,
     matches, 
     step
@@ -38,14 +39,20 @@ def log_equivariant_loss_artifacts(
 
     # Log tensors to a file and save artifact
     if 'equivariant_loss_tensors' not in run.artifacts:
-        torch.save(
-            {
+        save_tensors = {
                 "image0": image0, "image1": image1, 
                 "mask0": mask0, "mask1": mask1,
                 "feature0": feature0, "feature1": feature1, 
                 "points2d0": points2d0, "points2d1": points2d1,
                 "matches": matches,
-            }, 
+            }
+        #i = 0
+        if list_encoder_feature0 is not None and list_encoder_feature1 is not None:
+            for index, encoder_feature_index0, encoder_feature_index1 in zip(list_encoder_feature0, list_encoder_feature1, list_encoder_indexes):
+                save_tensors[f"encoder_feature0_index_{index}"] = encoder_feature_index0
+                save_tensors[f"encoder_feature1_index_{index}"] = encoder_feature_index1
+        torch.save(
+            save_tensors, 
             path
         )
         run.log_artifact(path, name="artifacts/train/equivariant_loss_tensors")

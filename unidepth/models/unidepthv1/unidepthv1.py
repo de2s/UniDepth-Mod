@@ -219,6 +219,7 @@ class UniDepthV1(
             "points": points_3d,
             "depth": predictions[:, -1:],
             "cond_features": depth_features,
+            "encoder_outputs": inputs["encoder_outputs"],
         }
         self.pixel_decoder.test_fixed_camera = False
 
@@ -308,6 +309,7 @@ class UniDepthV1(
             equivariance_losses, equivariance_metrics = loss(
                 image = inputs["image_original"][idxs],
                 feature = outputs["cond_features"][idxs],
+                encoder_features = [output[idxs] for output in outputs["encoder_outputs"]],
                 depth = inputs["depth"][idxs],
                 intrinsics = inputs["camera"].K[idxs],
                 estimated_depth = outputs["depth"][idxs],

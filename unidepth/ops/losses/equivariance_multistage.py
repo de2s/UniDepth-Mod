@@ -16,17 +16,21 @@ from .utils import FNS, masked_mean
 from .utils import FNS
 
 
-class EqSelfDistill(nn.Module):
+class EqSelfDistillMultiStage(nn.Module):
 
-    def __init__(self, weight: float, transform_generation: str, representation_type: str, feature_dim: int, output_fn: str = "sqrt",  eps: float = 1e-5, change_base: bool = False, inverse_change_base: bool = False, use_gt: bool = True):
+    def __init__(self, weight: float, encoder_feature_weights: list, encoder_feature_indexes: list, feature_weight: int, transform_generation: str, representation_type: str, feature_dim: int, encoder_feature_dim: int,  output_fn: str = "sqrt",  eps: float = 1e-5, change_base: bool = False, inverse_change_base: bool = False, use_gt: bool = True):
         super().__init__()
         self.name: str = self.__class__.__name__
         self.weight: float = weight
+        self.encoder_feature_indexes = encoder_feature_indexes
+        self.encoder_feature_weights = encoder_feature_weights
+        self.feature_weight = feature_weight
         self.dims = (-2, -1)
         self.output_fn = FNS[output_fn]
+        self.feature_dim = feature_dim
+        self.encoder_feature_dim = encoder_feature_dim
         self.transform_generation = transform_generation
         self.representation_type = representation_type
-        self.feature_dim = feature_dim
         self.change_base = change_base
         self.inverse_change_base = inverse_change_base
         self.eps: float = eps
@@ -42,17 +46,17 @@ class EqSelfDistill(nn.Module):
             self.register_buffer("change_base_generator", torch.zeros(self.feature_dim,self.feature_dim))
 
         if self.transform_generation == "SO(3)->Irreps":
-            self.transform_generator = GeneratorSO3toIrreps(representation_type)
+            self.feature_transform_generator = GeneratorSO3toIrreps(representation_type)
         elif self.transform_generation == "SO(3)->SO(n)":
-            self.transform_generator = GeneratorSO3toSOn(self.feature_dim)
-        elif self.transform_generation == "Gen->SO(n)":
-            self.transform_generator = GeneratorGtoSOn(self.feature_dim)
+            self.feature_transform_generator = GeneratorSO3toSOn(self.feature_dim)
+            self.encoder_feature_transform_generators = nn.ModuleList([GeneratorSO3toSOn(self.encoder_feature_dim) for i in encoder_feature_indexes])
 
     @torch.autocast(device_type="cuda", enabled=False, dtype=torch.float32)
     def forward(
         self,
         image: torch.Tensor, # Used only for debugging
         feature: torch.Tensor,
+        encoder_features: list,
         depth: torch.Tensor,
         intrinsics: torch.Tensor,
         estimated_depth: torch.Tensor,
@@ -68,6 +72,11 @@ class EqSelfDistill(nn.Module):
         # Copy log variable because this function should only log the first iteration
         should_log = log
         metrics = {}
+
+        # Separate selected encoder features
+        encoder_features = [encoder_features[i] for i in self.encoder_feature_indexes]
+        num_encoder_features = len(encoder_features)
+
 
         # Choose between ground truth or estimated data
         depth = depth if self.use_gt else estimated_depth
@@ -140,19 +149,22 @@ class EqSelfDistill(nn.Module):
         mask_flat = rearrange(mask, "b c h w -> b (h w) c")
         points2d_flat = rearrange(points2d, "b c h w -> b (h w) c")
         features_flat = rearrange(feature, "b c h w -> b (h w) c")
-        
+        list_encoder_features_flat = [rearrange(encoder_feature,  "b h w c -> b (h w) c") for encoder_feature in encoder_features]
+
         # Create change of basis matrixes
         change_base = torch.matrix_exp(self.change_base_generator)
         change_base_inv = torch.matrix_exp(-self.change_base_generator)
 
         # Iterate samples
         features0, features1 = [], []
+        list_encoder_features0, list_encoder_features1 = [[] for i in range(num_encoder_features)], [[] for i in range(num_encoder_features)]
         for i in range(B // 2):
             left, right = 2 * i, 2 * i + 1
             image0, image1 = (image[left], image[right]) if image is not None else (None, None)
             points3d0, points3d1 = points3d_flat[left], points3d_flat[right]
             points2d0, points2d1 = points2d_flat[left], points2d_flat[right]
             feature0, feature1 = features_flat[left], features_flat[right]
+            list_encoder_feature0, list_encoder_feature1  = [encoders_feature_flat[left] for encoders_feature_flat in list_encoder_features_flat], [encoder_features_flat[right] for encoder_features_flat in list_encoder_features_flat] # TODO: CONCATENATE IN SINGLE TENSOR
             extrinsics0, extrinsics1 = extrinsics[left], extrinsics[right]
             mask0, mask1 = mask_flat[left], mask_flat[right]
             flip0, flip1 = flips[left], flips[right]
@@ -173,6 +185,8 @@ class EqSelfDistill(nn.Module):
                 points2d1 = points2d1[mask1]
                 feature0 = feature0[mask0]
                 feature1 = feature1[mask1]
+                list_encoder_feature0 = [encoder_feature0[mask0] for encoder_feature0 in list_encoder_feature0]
+                list_encoder_feature1 = [encoder_feature1[mask1] for encoder_feature1 in list_encoder_feature1]
 
             # Log number of points    
             if should_log:
@@ -213,6 +227,7 @@ class EqSelfDistill(nn.Module):
                     image0=image0, image1=image1, 
                     mask0=rearrange(mask0, "(h w) -> h w", h=num_patches_y, w=num_patches_x), mask1=rearrange(mask1, "(h w) -> h w", h=num_patches_y, w=num_patches_x), 
                     feature0=feature0, feature1=feature1, 
+                    list_encoder_feature0=list_encoder_feature0, list_encoder_feature1=list_encoder_feature0, list_encoder_indexes=self.encoder_feature_indexes,
                     points2d0=points2d0, points2d1=points2d1,
                     matches=matches,
                     step = step
@@ -221,6 +236,9 @@ class EqSelfDistill(nn.Module):
             # Filter out not matched points
             feature0 = feature0[matches[:, 0]]
             feature1 = feature1[matches[:, 1]]
+            list_encoder_feature0 = [encoder_feature0[matches[:, 0]] for encoder_feature0 in list_encoder_feature0]
+            list_encoder_feature1 = [encoder_feature1[matches[:, 1]] for encoder_feature1 in list_encoder_feature1]
+
 
             # Track number of matched points
             if should_log:
@@ -229,32 +247,52 @@ class EqSelfDistill(nn.Module):
             # Change of base for the feature vectors
             feature0_transformed = torch.matmul(change_base, feature0.T).T
             feature1_transformed = torch.matmul(change_base, feature1.T).T
-            
-            # Rotate vectors
-            transformation0 = self.transform_generator.getTransformation(extrinsics0, extrinsics1, should_log, step)
-            feature0_transformed = torch.matmul(transformation0, feature0_transformed.T).T
-            transformation1 = self.transform_generator.getTransformation(extrinsics1, extrinsics0, should_log, step)
-            feature1_transformed = torch.matmul(transformation1, feature1_transformed.T).T
+            # TO DO THIS WE NEED AN ARRAY OF CHANGE OF BASE MATRIX
+            # list_encoder_feature0_transformed = [torch.matmul(change_base, encoder_feature0.T).T for encoder_feature0 in list_encoder_feature0]
+            # list_encoder_feature1_transformed = [torch.matmul(change_base, encoder_feature1.T).T for encoder_feature1 in list_encoder_feature1]
+            # INSTEAD
+            list_encoder_feature0_transformed = list_encoder_feature0
+            list_encoder_feature1_transformed = list_encoder_feature1
 
+            # Rotate features
+            transformation0 = self.feature_transform_generator.getTransformation(extrinsics0, extrinsics1, log=should_log, step=step)
+            feature0_transformed = torch.matmul(transformation0, feature0_transformed.T).T
+            transformation1 = self.feature_transform_generator.getTransformation(extrinsics1, extrinsics0, log=should_log, step=step)
+            feature1_transformed = torch.matmul(transformation1, feature1_transformed.T).T
+            # Rotate encoder features
+            for i in range(num_encoder_features):
+                encoder_transformation0 = self.encoder_feature_transform_generators[i].getTransformation(extrinsics0, extrinsics1, log=should_log, tag=f"encoder_{self.encoder_feature_indexes[i]}", step=step)
+                list_encoder_feature0_transformed[i] = torch.matmul(encoder_transformation0, list_encoder_feature0_transformed[i].T).T
+                encoder_transformation1 = self.encoder_feature_transform_generators[i].getTransformation(extrinsics1, extrinsics0, log=should_log, tag=f"encoder_{self.encoder_feature_indexes[i]}", step=step)
+                list_encoder_feature1_transformed[i] = torch.matmul(encoder_transformation1, list_encoder_feature1_transformed[i].T).T
+            
             # Revert change of base for the feature vectors
             if self.inverse_change_base:
                 feature0_transformed = torch.matmul(change_base_inv, feature0_transformed.T).T
                 feature1_transformed = torch.matmul(change_base_inv, feature1_transformed.T).T
+                # TO DO THIS WE NEED AN ARRAY OF CHANGE OF BASE MATRIX
+                # list_encoder_feature0_transformed = [torch.matmul(change_base_inv, encoder_feature0_transformed.T).T for encoder_feature0_transformed in list_encoder_feature0_transformed]
+                # list_encoder_feature1_transformed = [torch.matmul(change_base_inv, encoder_feature1_transformed.T).T for encoder_feature1_transformed in list_encoder_feature1_transformed]
 
             # Aggregate results
             features0.append(feature0_transformed)
             features1.append(feature1)
             features0.append(feature1_transformed)
             features1.append(feature0)
+            for i in range(num_encoder_features):
+                list_encoder_features0[i].append(list_encoder_feature0_transformed[i])
+                list_encoder_features1[i].append(list_encoder_feature1[i])
+                list_encoder_features0[i].append(list_encoder_feature1_transformed[i])
+                list_encoder_features1[i].append(list_encoder_feature0[i])
 
             # Log only the first iteration
             should_log = False
 
-        # Compute aggregated loss
+        # Compute aggregated loss for feature equivariance
         if len(features0) > 0 and len(features1) > 0:
             features0 = torch.cat(features0, dim=0)
             features1 = torch.cat(features1, dim=0)
-            loss = self.loss(features0, features1.detach())
+            features_loss = self.loss(features0, features1.detach())
         else:
             # If Does not contribute to gradients if image pair is skipped
             print("Warning: Empty loss")
@@ -262,7 +300,26 @@ class EqSelfDistill(nn.Module):
             dummy = torch.zeros(1, device=device)
             for p in self.parameters():
                 dummy = dummy + (p.sum() * 0.0)
-            loss = dummy
+            features_loss = dummy
+
+        # Compute aggregated loss for encoder feature equivariance
+        list_encoder_features_loss = []
+        for i in range(num_encoder_features):
+            if len(list_encoder_features0[i]) > 0 and len(list_encoder_features1[i]) > 0:
+                encoder_features0 = torch.cat(list_encoder_features0[i], dim=0)
+                encoder_features1 = torch.cat(list_encoder_features1[i], dim=0)
+                encoder_features_loss = self.loss(encoder_features0, encoder_features1.detach())
+                list_encoder_features_loss.append(encoder_features_loss)
+            else:
+                # HACK: Create a zero that stays in the computational graph to avoid exceptions
+                dummy = torch.zeros(1, device=device)
+                for p in self.parameters():
+                    dummy = dummy + (p.sum() * 0.0)
+                encoder_features_loss = dummy
+                list_encoder_features_loss.append(encoder_features_loss)
+
+        # Aggregate different losses
+        loss = (self.feature_weight * features_loss + sum(encoder_feature_weight * encoder_features_loss for encoder_feature_weight, encoder_features_loss in zip(self.encoder_feature_weights, list_encoder_features_loss))) / (num_encoder_features + 1)
 
         return loss, metrics
     
@@ -286,10 +343,14 @@ class EqSelfDistill(nn.Module):
     def build(cls, config):
         obj = cls(
             weight=config["weight"],
+            encoder_feature_indexes = config["encoder_feature_indexes"],
+            encoder_feature_weights = config["encoder_feature_weights"],
+            feature_weight = config["feature_weight"],
+            feature_dim=config["feature_dim"],
+            encoder_feature_dim=config["encoder_feature_dim"],
+            output_fn=config["output_fn"],
             transform_generation = config["transform_generation"],
             representation_type = config["representation_type"],
-            feature_dim=config["feature_dim"],
-            output_fn=config["output_fn"],
             change_base=config["change_base"],
             inverse_change_base=config["inverse_change_base"],
             use_gt = config["use_gt"]
@@ -307,7 +368,7 @@ class GeneratorSO3toIrreps(nn.Module):
         # Generate irreps
         self.irreps = Irreps(representation_type)
 
-    def getTransformation(self, pose0: torch.Tensor, pose1: torch.Tensor, log = False, step = -1):
+    def getTransformation(self, pose0: torch.Tensor, pose1: torch.Tensor, log = False, tag=None, step = -1):
 
         # Compute relative pose
         pose0_inv = invert_matrix(pose0)
@@ -329,11 +390,11 @@ class GeneratorSO3toIrreps(nn.Module):
                     "train/equivariance/relative_pose/y": pose_rel[1, 3],
                     "train/equivariance/relative_pose/z": pose_rel[2, 3],
                 },
-                context={"subset": "train"},
+                context={"subset": "train", "tag": tag},
                 step=step
             )
-            run.track(Image(colorize(R.detach().cpu().numpy(), cmap="gray")), name="train/equivariance/rotation_matrix", context={"subset": "train"}, step=step)
-            run.track(Distribution(R.detach().cpu().numpy()), name=f"train/equivariance/rotation_matrix_distribution", context={"subset": "train"}, step=step)
+            run.track(Image(colorize(R.detach().cpu().numpy(), cmap="gray")), name="train/equivariance/rotation_matrix", context={"subset": "train", "tag": tag}, step=step)
+            run.track(Distribution(R.detach().cpu().numpy()), name=f"train/equivariance/rotation_matrix_distribution", context={"subset": "train", "tag": tag}, step=step)
             
         return R
 
@@ -344,9 +405,10 @@ class GeneratorSO3toSOn(nn.Module):
 
         super().__init__()
         self.feature_dim = feature_dim
-        self.rotation_decoder = MonotonicAngleDecoder()
+        self.num_angles = self.feature_dim * (self.feature_dim - 1) // 2
+        self.rotation_decoder = MonotonicAngleDecoder(feature_dim)
 
-    def getTransformation(self, pose0: torch.Tensor, pose1: torch.Tensor, log = False, step = -1):
+    def getTransformation(self, pose0: torch.Tensor, pose1: torch.Tensor, log = False, tag=None, step = -1):
 
         # Compute relative position
         pose0_inv = invert_matrix(pose0)
@@ -358,8 +420,7 @@ class GeneratorSO3toSOn(nn.Module):
         generator_angles = self.rotation_decoder(input_angles)
 
         # Check number of angles
-        nun_angles = self.feature_dim * (self.feature_dim - 1) // 2
-        assert generator_angles.numel() == nun_angles
+        assert generator_angles.numel() == self.num_angles
 
         # Generate rotation matrix
         generator_matrix = torch.zeros((self.feature_dim, self.feature_dim), device=generator_angles.device)
@@ -384,12 +445,12 @@ class GeneratorSO3toSOn(nn.Module):
                     "train/equivariance/relative_pose/y": pose_rel[1, 3],
                     "train/equivariance/relative_pose/z": pose_rel[2, 3]
                 },
-                context={"subset": "train"},
+                context={"subset": "train", "tag": tag},
                 step=step
             )
-            run.track(Distribution(generator_matrix.detach().cpu().numpy()), name=f"train/equivariance/generator_matrix_distribution", context={"subset": "train"}, step=step)
-            run.track(Distribution(rotation_matrix.detach().cpu().numpy()), name=f"train/equivariance/rotation_matrix_distribution", context={"subset": "train"}, step=step)
-            run.track(Image(colorize(rotation_matrix.detach().cpu().numpy(), cmap="gray")), name="train/equivariance/rotation_matrix", context={"subset": "train"}, step=step)
+            run.track(Distribution(generator_matrix.detach().cpu().numpy()), name=f"train/equivariance/generator_matrix_distribution", context={"subset": "train", "tag": tag}, step=step)
+            run.track(Distribution(rotation_matrix.detach().cpu().numpy()), name=f"train/equivariance/rotation_matrix_distribution", context={"subset": "train", "tag": tag}, step=step)
+            run.track(Image(colorize(rotation_matrix.detach().cpu().numpy(), cmap="gray")), name="train/equivariance/rotation_matrix", context={"subset": "train", "tag": tag}, step=step)
 
         return rotation_matrix
 
@@ -397,15 +458,21 @@ class GeneratorSO3toSOn(nn.Module):
 class MonotonicAngleDecoder(nn.Module):
 
     def __init__(
-        self, 
+        self,
+        feature_dim,
         init_value=math.pi
     ):
         super().__init__()
 
+
         # --- Initialization ---
-        self.fc1 = nn.Linear(3, 128)
-        self.fc2 = nn.Linear(128, 512)
-        self.fc3 = nn.Linear(512, 130816)
+        #self.fc1 = nn.Linear(3, 128)
+        #self.fc2 = nn.Linear(128, 512)
+        #self.fc3 = nn.Linear(512, feature_dim * (feature_dim - 1) // 2)
+
+        self.fc1 = nn.Linear(3, 64)
+        self.fc2 = nn.Linear(64, 128)
+        self.fc3 = nn.Linear(128, feature_dim * (feature_dim - 1) // 2)
 
         # Small weights for hidden layers
         for fc in [self.fc1, self.fc2, self.fc3]:
@@ -431,35 +498,3 @@ class MonotonicAngleDecoder(nn.Module):
         x = x % (2 * math.pi) - math.pi
 
         return x
-
-class GeneratorGtoSOn(nn.Module):
-
-    def __init__(self, feature_dim):
-
-        super().__init__()
-        self.feature_dim = feature_dim
-        self.generator = nn.Parameter(torch.zeros(feature_dim * (feature_dim - 1) // 2))
-
-    def getTransformation(self, pose0: torch.Tensor, pose1: torch.Tensor, log = False, step = -1):
-
-        # Generate rotation matrix
-        generator_matrix = torch.zeros((self.feature_dim, self.feature_dim), device=self.generator .device)
-
-        # Get indices for upper triangle and fill upper and lower parts
-        rows, cols = torch.triu_indices(self.feature_dim, self.feature_dim, offset=1)
-        generator_matrix[rows, cols] = self.generator
-        generator_matrix[cols, rows] = -self.generator
-
-        # Generate rotation matrix
-        rotation_matrix = torch.matrix_exp(generator_matrix)
-
-        # Log relative pose angles and distances
-        if log:
-            run = getAimRun()
-            run.track(Distribution(generator_matrix.detach().cpu().numpy()), name=f"train/equivariance/generator_matrix_distribution", context={"subset": "train"}, step=step)
-            run.track(Distribution(rotation_matrix.detach().cpu().numpy()), name=f"train/equivariance/rotation_matrix_distribution", context={"subset": "train"}, step=step)
-            run.track(Image(colorize(rotation_matrix.detach().cpu().numpy(), cmap="gray")), name="train/equivariance/rotation_matrix", context={"subset": "train"}, step=step)
-
-        return rotation_matrix
-
-    
