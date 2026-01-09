@@ -6,12 +6,11 @@ services:
       args:
         USER_UID: 1000
         USER_GID: 1000
-    container_name: unidepth-dev
     ports:
       - "43800:43800"
     volumes:
-      - /home/dsalgado/Volumes/unidepth-dev-data:/data
-      - /mnt/data/datasets:/data/datasets
+      - /mnt/data2/Volumes/unidepth-dev-data:/data
+      - /mnt/data1/datasets:/data/datasets
     deploy:
       resources:
         reservations:
