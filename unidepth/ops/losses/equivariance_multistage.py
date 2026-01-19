@@ -74,9 +74,11 @@ class EqSelfDistillMultiStage(nn.Module):
         metrics = {}
 
         # Separate selected encoder features
-        encoder_features = [encoder_features[i] for i in self.encoder_feature_indexes]
-        num_encoder_features = len(encoder_features)
-
+        num_encoder_layers = len(encoder_features)
+        generator_positions = [
+            next(j for j, idx in reversed(list(enumerate(self.encoder_feature_indexes))) if idx <= i)
+            for i in range(num_encoder_layers)
+            ]
 
         # Choose between ground truth or estimated data
         depth = depth if self.use_gt else estimated_depth
@@ -157,7 +159,7 @@ class EqSelfDistillMultiStage(nn.Module):
 
         # Iterate samples
         features0, features1 = [], []
-        list_encoder_features0, list_encoder_features1 = [[] for i in range(num_encoder_features)], [[] for i in range(num_encoder_features)]
+        list_encoder_features0, list_encoder_features1 = [[] for i in range(num_encoder_layers)], [[] for i in range(num_encoder_layers)]
         for i in range(B // 2):
             left, right = 2 * i, 2 * i + 1
             image0, image1 = (image[left], image[right]) if image is not None else (None, None)
@@ -260,12 +262,12 @@ class EqSelfDistillMultiStage(nn.Module):
             transformation1 = self.feature_transform_generator.getTransformation(extrinsics1, extrinsics0, log=should_log, step=step)
             feature1_transformed = torch.matmul(transformation1, feature1_transformed.T).T
             # Rotate encoder features
-            for i in range(num_encoder_features):
-                encoder_transformation0 = self.encoder_feature_transform_generators[i].getTransformation(extrinsics0, extrinsics1, log=should_log, tag=f"encoder_{self.encoder_feature_indexes[i]}", step=step)
+            for i in range(num_encoder_layers):
+                encoder_transformation0 = self.encoder_feature_transform_generators[generator_positions[i]].getTransformation(extrinsics0, extrinsics1, log=should_log, tag=f"encoder_{self.encoder_feature_indexes[generator_positions[i]]}", step=step)
                 list_encoder_feature0_transformed[i] = torch.matmul(encoder_transformation0, list_encoder_feature0_transformed[i].T).T
-                encoder_transformation1 = self.encoder_feature_transform_generators[i].getTransformation(extrinsics1, extrinsics0, log=should_log, tag=f"encoder_{self.encoder_feature_indexes[i]}", step=step)
+                encoder_transformation1 = self.encoder_feature_transform_generators[generator_positions[i]].getTransformation(extrinsics1, extrinsics0, log=should_log, tag=f"encoder_{self.encoder_feature_indexes[generator_positions[i]]}", step=step)
                 list_encoder_feature1_transformed[i] = torch.matmul(encoder_transformation1, list_encoder_feature1_transformed[i].T).T
-            
+
             # Revert change of base for the feature vectors
             if self.inverse_change_base:
                 feature0_transformed = torch.matmul(change_base_inv, feature0_transformed.T).T
@@ -279,7 +281,7 @@ class EqSelfDistillMultiStage(nn.Module):
             features1.append(feature1)
             features0.append(feature1_transformed)
             features1.append(feature0)
-            for i in range(num_encoder_features):
+            for i in range(num_encoder_layers):
                 list_encoder_features0[i].append(list_encoder_feature0_transformed[i])
                 list_encoder_features1[i].append(list_encoder_feature1[i])
                 list_encoder_features0[i].append(list_encoder_feature1_transformed[i])
@@ -304,7 +306,7 @@ class EqSelfDistillMultiStage(nn.Module):
 
         # Compute aggregated loss for encoder feature equivariance
         list_encoder_features_loss = []
-        for i in range(num_encoder_features):
+        for i in range(num_encoder_layers):
             if len(list_encoder_features0[i]) > 0 and len(list_encoder_features1[i]) > 0:
                 encoder_features0 = torch.cat(list_encoder_features0[i], dim=0)
                 encoder_features1 = torch.cat(list_encoder_features1[i], dim=0)
@@ -319,7 +321,7 @@ class EqSelfDistillMultiStage(nn.Module):
                 list_encoder_features_loss.append(encoder_features_loss)
 
         # Aggregate different losses
-        loss = (self.feature_weight * features_loss + sum(encoder_feature_weight * encoder_features_loss for encoder_feature_weight, encoder_features_loss in zip(self.encoder_feature_weights, list_encoder_features_loss))) / (num_encoder_features + 1)
+        loss = (self.feature_weight * features_loss + sum(encoder_feature_weight * encoder_features_loss for encoder_feature_weight, encoder_features_loss in zip([self.encoder_feature_weights[i] for i in generator_positions], list_encoder_features_loss))) / (num_encoder_layers + 1)
 
         return loss, metrics
     
