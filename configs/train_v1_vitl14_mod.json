@@ -138,9 +138,9 @@
       "sampling_mode": "neighboor", // "continuous" or "neighboor"
       "sampling_window_size": {
          // Sequence datasets from UniDepth
-         "Argoverse2": 10,
-         "ScanNet": 10,
-         "Waymo": 10,
+         "Argoverse2": 3,
+         "ScanNet": 5,
+         "Waymo": 2,
          // Available sequence datasets
          "ADT": 10,
          "ARKit": 10,
@@ -150,29 +150,30 @@
          "Cityscape": 10,
          "DTURMVD": 10,
          "DynReplica": 10,
-         "EDEN": 10,
-         "FaceDepth": 10,
-         "HM3D": 10,
-         "HOI4D": 10,
+         "EDEN": 3,
+         // "FaceDepth": 10, // Consistently low IoU
+         "HM3D": 4,
+         "HOI4D": 5,
          "KITTIMulti": 10,
-         "MatrixCity": 10,
-         "MidAir": 10,
-         "MIP": 10,
-         "MVImgNet": 10,
-         "MVSynth": 10,
-         "NeRDS360": 10,
-         "NianticMapFree": 10,
-         "PointOdyssey": 10,
-         "ScanNet": 10,
-         "ScanNetpp": 10,
-         "Sintel": 10,
-         "TartanAir": 10,
-         "TATRMVD": 10,
+         "MatrixCity": 1,
+         "MidAir": 5,
+         "MIP": 2,
+         "MVImgNet": 7,
+         // "MVSynth": 10, // Consistently low IoU
+         // "NeRDS360": 10, // Consistently low IoU
+         "NianticMapFree": 2,
+         "PointOdyssey": 5,
+         "ScanNet": 5,
+         "ScanNetpp": 2,
+         "Sintel": 5,
+         "TartanAir": 5,
+         // "TATRMVD": 10, // Consistently low IoU
          "Theo": 10,
-         "UnrealStereo4K": 10,
-         "Waymo": 10,
-         "WildRGBD": 10,
+         // "UnrealStereo4K": 10, // Consistently low IoU
+         "Waymo": 2,
+         "WildRGBD": 2,
          // Image datasets from UniDepth
+         "Cityscape": 1,
          "DDAD": 1,
          "DiodeIndoor": 1,
          "HAMMER": 1,
@@ -212,7 +213,7 @@
          // "PointOdyssey",
          // "ScanNetpp",
          // "Sintel",
-         //"TartanAir",
+         // "TartanAir",
          // "TATRMVD",        // Used in validation (Zero Shot)
          // "Theo",
          // "UnrealStereo4K",
