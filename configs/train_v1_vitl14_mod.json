@@ -1,77 +1,76 @@
 {
-    "generic":{
-       "seed":13,
-       "deterministic":true
-    },
-    "training":{
+   "generic":{
+      "seed":13,
+      "deterministic":true
+   },
+   "training":{
       "n_iters": 300000,
-      "validation_interval": 1000,
-      "log_train_metrics_interval": 100,
-       "batch_size":8,
-       "nsteps_accumulation_gradient":2,
+      "validation_interval": 1000, //1000,
+      "log_train_metrics_interval": 1,
+      "batch_size":8,
+      "nsteps_accumulation_gradient":2,
       "pretrained": "/unidepth/cache/models/pretrained/unidepth_v1_pytorch_model.bin",
       "checkpoint_interval": 1000,
-       "use_checkpoint":false,
-       "lr":1e-4,
-       "lr_final":1e-6,
-       "lr_warmup":1.0,
-       "cycle_beta":false,
-       "wd":0.1,
-       "wd_final":0.1,
+      "use_checkpoint":false,
+      "lr":1e-4,
+      "lr_final":1e-6,
+      "lr_warmup":1.0,
+      "cycle_beta":false,
+      "wd":0.1,
+      "wd_final":0.1,
       "warmup_iters": 30000,
-       "ld":1.0,
-       "drop_path":0.0,
-       "ema":true,
-       "f16":true,
-       "clipping":1.0,
-       "losses":{
-          "depth": {
-             "name": "SILog",
-             "weight": 1.0,
-             "output_fn": "sqrt",
-             "input_fn": "log",
-             "dims": [
-                -2,
-                -1
-             ],
-             "integrated": 0.15
-          },
-          "camera": {
-             "name": "Regression",
-             "weight": 0.25,
-             "gamma": 1.0,
-             "alpha": 1.0,
-             "fn": "l2",
-             "output_fn": "sqrt",
-             "input_fn": "linear"
-          },
-          "invariance": {
-            "name": "SelfDistill",
+      "ld":1.0,
+      "drop_path":0.0,
+      "ema":true,
+      "f16":true,
+      "clipping":1.0,
+      "losses":{
+         "depth": {
+            "name": "SILog",
+            "weight": 1.0,
+            "output_fn": "sqrt",
+            "input_fn": "log",
+            "dims": [
+               -2,
+               -1
+            ],
+            "integrated": 0.15
+         },
+         "camera": {
+            "name": "Regression",
+            "weight": 0.25,
+            "gamma": 1.0,
+            "alpha": 1.0,
+            "fn": "l2",
+            "output_fn": "sqrt",
+            "input_fn": "linear"
+         },
+         "invariance": {
+           "name": "SelfDistill",
+           "weight": 0.1,
+           "output_fn": "sqrt"
+         },
+         "equivariance": {
+            "name": "EqSelfDistill",
             "weight": 0.1,
-            "output_fn": "sqrt"
-          },
-         /*"equivariance": {
-             "name": "EqSelfDistill",
-             "weight": 0.1,
-             "output_fn": "sqrt",
-             "feature_dim": 512,
-             "change_base": false,
-             "inverse_change_base": false,
+            "output_fn": "sqrt",
+            "feature_dim": 512,
+            "change_base": false,
+            "inverse_change_base": false,
             //"transform_generation": "SO(3)->Irreps",
             "representation_type": null,
             //"representation_type": "512x0e", 
             //"representation_type": "1x0e+1x255e",
-            //"transform_generation": "SO(3)->SO(n)",
-            "transform_generation": "Generator->SO(n)",
+            "transform_generation": "SO(3)->SO(n)",
+            //"transform_generation": "Generator->SO(n)",
+            "identity_penalty_factor": 1.0,
+            "identity_penalty_sigma": 0.1,
             "use_gt": true
-         },*/
-         "equivariance": {
+         },
+         /*"equivariance": {
             "name": "EqSelfDistillMultiStage",
-            //"name": "EqSelfDistillWithPoseEstimator",
             "weight": 0.1,
             "feature_weight": 1,
-            //"encoder_feature_indexes": [0,   1,   2,   3,   4,   5,   6,   7,   8,   9,  10,  11,  12,  13,  14,  15,  16,  17,  18,  19,  20,  21,  22,  23],
-            //"encoder_feature_weights": [1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1],
             "encoder_feature_indexes": [0, 6, 12, 18],
             "encoder_feature_weights": [1, 1,  1,  1],
             "feature_weight": 1.0,
@@ -86,19 +85,19 @@
             //"representation_type": "1x0e+1x255e",
             "transform_generation": "SO(3)->SO(n)",
             //"transform_generation": "Generator->SO(n)",
-             "use_gt": true
-          }
-       }
-    },
-    "data":{
-       "image_shape":[
-          480,
-          640
-       ],
-       "normalization":"imagenet",
-       "num_copies":2,
-       "num_frames":2,
-       "sampling":{
+            "use_gt": true
+         }*/
+      }
+   },
+   "data":{
+      "image_shape":[
+         480,
+         640
+      ],
+      "normalization":"imagenet",
+      "num_copies":2,
+      "num_frames":2,
+      "sampling":{
          // Sequence datasets from UniDepth
          "Argoverse2": 1.0,
          "ScanNet": 1.0,
@@ -135,16 +134,15 @@
          "UnrealStereo4K": 1.0,
          "Waymo": 1.0,
          "WildRGBD": 1.0,
-       },
+      },
       "sampling_mode": "neighboor", // "continuous" or "neighboor"
-       "sampling_window_size": {
+      "sampling_window_size": {
          // Sequence datasets from UniDepth
          "Argoverse2": 10,
          "ScanNet": 10,
          "Waymo": 10,
          // Available sequence datasets
          "ADT": 10,
-         "Argoverse2": 10,
          "ARKit": 10,
          "ASE": 10,
          "BEDLAM": 10,
@@ -209,7 +207,7 @@
          // "MIP",
          "MVImgNet",
          // "MVSynth",
-         "NeRDS360",
+         // "NeRDS360",
          "NianticMapFree",
          // "PointOdyssey",
          // "ScanNetpp",
@@ -250,53 +248,53 @@
          "BlendedMVG",
          "DTURMVD",
          "TATRMVD",
-       ],
-       "data_root":"datasets",
-       "crop":"garg",
-       "augmentations":{
-          "random_scale":2.0,
-          "random_jitter":0.4,
-          "jitter_p":0.8,
-          "random_blur":2.0,
-          "blur_p":0.2,
-          "random_gamma":0.2,
-          "gamma_p":0.8,
-          "grayscale_p":0.2,
-          "flip_p":0.5,
-          "test_context":1.0,
-          "shape_constraints":{
-             "ratio_bounds":[
-                0.66,
-                2.0
-             ],
-             "pixels_max":250000,
-             "pixels_min":250000,
-             "height_min":15,
-             "width_min":15,
-             "shape_mult":14,
-             "sample":true
-          }
-       }
-    },
-    "model":{
-       "name":"UniDepthV1",
-       "num_heads":8,
-       "expansion":4,
-       "pixel_decoder":{
-          "hidden_dim":512,
-          "depths":[
-             3,
-             2,
-             1
-          ],
-          "dropout":0.0
-       },
-       "pixel_encoder":{
-          "name":"dinov2_vitl14",
-          "norm":true,
-          "pretrained":"cache/models/pretrained/dinov2_vitl14_pretrain_unidepth.pth",
-          "lr":1e-5,
-          "frozen_stages":0
-       }
-    }
- }
+      ],
+      "data_root":"datasets",
+      "crop":"garg",
+      "augmentations":{
+         "random_scale":2.0,
+         "random_jitter":0.4,
+         "jitter_p":0.8,
+         "random_blur":2.0,
+         "blur_p":0.2,
+         "random_gamma":0.2,
+         "gamma_p":0.8,
+         "grayscale_p":0.2,
+         "flip_p":0.5,
+         "test_context":1.0,
+         "shape_constraints":{
+            "ratio_bounds":[
+               0.66,
+               2.0
+            ],
+            "pixels_max":250000,
+            "pixels_min":250000,
+            "height_min":15,
+            "width_min":15,
+            "shape_mult":14,
+            "sample":true
+         }
+      }
+   },
+   "model":{
+      "name":"UniDepthV1",
+      "num_heads":8,
+      "expansion":4,
+      "pixel_decoder":{
+         "hidden_dim":512,
+         "depths":[
+            3,
+            2,
+            1
+         ],
+         "dropout":0.0
+      },
+      "pixel_encoder":{
+         "name":"dinov2_vitl14",
+         "norm":true,
+         "pretrained":"cache/models/pretrained/dinov2_vitl14_pretrain_unidepth.pth",
+         "lr":1e-5,
+         "frozen_stages":0
+      }
+   }
+}

@@ -18,7 +18,7 @@ from .utils import FNS
 
 class EqSelfDistill(nn.Module):
 
-    def __init__(self, weight: float, transform_generation: str, representation_type: str, feature_dim: int, output_fn: str = "sqrt",  eps: float = 1e-5, change_base: bool = False, inverse_change_base: bool = False, use_gt: bool = True):
+    def __init__(self, weight: float, transform_generation: str, representation_type: str, identity_penalty_factor: float, identity_penalty_sigma: float, feature_dim: int, output_fn: str = "sqrt",  eps: float = 1e-5, change_base: bool = False, inverse_change_base: bool = False, use_gt: bool = True):
         super().__init__()
         self.name: str = self.__class__.__name__
         self.weight: float = weight
@@ -26,6 +26,8 @@ class EqSelfDistill(nn.Module):
         self.output_fn = FNS[output_fn]
         self.transform_generation = transform_generation
         self.representation_type = representation_type
+        self.identity_penalty_factor = identity_penalty_factor
+        self.identity_penalty_sigma = identity_penalty_sigma
         self.feature_dim = feature_dim
         self.change_base = change_base
         self.inverse_change_base = inverse_change_base
@@ -64,7 +66,7 @@ class EqSelfDistill(nn.Module):
         patch_size=14,
         log = False,
         step = -1
-    ) -> Tuple[torch.Tensor, dict]:
+    ) -> Tuple[torch.Tensor, torch.Tensor, dict]:
 
         # Copy log variable because this function should only log the first iteration
         should_log = log
@@ -148,6 +150,7 @@ class EqSelfDistill(nn.Module):
 
         # Iterate samples
         features0, features1 = [], []
+        transformations = []
         for i in range(B // 2):
             left, right = 2 * i, 2 * i + 1
             image0, image1 = (image[left], image[right]) if image is not None else (None, None)
@@ -214,7 +217,7 @@ class EqSelfDistill(nn.Module):
                     image0=image0, image1=image1, 
                     mask0=rearrange(mask0, "(h w) -> h w", h=num_patches_y, w=num_patches_x), mask1=rearrange(mask1, "(h w) -> h w", h=num_patches_y, w=num_patches_x), 
                     feature0=feature0, feature1=feature1,
-                    list_encoder_feature0=None, list_encoder_feature1=None, encoder_feature_indexes=None,
+                    list_encoder_feature0=None, list_encoder_feature1=None, list_encoder_indexes=None,
                     points2d0=points2d0, points2d1=points2d1,
                     matches=matches,
                     step = step
@@ -235,8 +238,10 @@ class EqSelfDistill(nn.Module):
             # Rotate vectors
             transformation0 = self.transform_generator.getTransformation(extrinsics0, extrinsics1, should_log, step)
             feature0_transformed = torch.matmul(transformation0, feature0_transformed.T).T
+            transformations.append(transformation0)
             transformation1 = self.transform_generator.getTransformation(extrinsics1, extrinsics0, should_log, step)
             feature1_transformed = torch.matmul(transformation1, feature1_transformed.T).T
+            transformations.append(transformation1)
 
             # Revert change of base for the feature vectors
             if self.inverse_change_base:
@@ -266,7 +271,12 @@ class EqSelfDistill(nn.Module):
                 dummy = dummy + (p.sum() * 0.0)
             loss = dummy
 
-        return loss, metrics
+        identity_penalty_loss = torch.zeros(0, device=device)
+        if self.identity_penalty_factor != 0.0 and len(transformations) != 0:
+            transformations = torch.stack(transformations, dim=0)
+            identity_penalty_loss = self.identity_penalty_factor * self.identity_penalty(transformations, self.identity_penalty_sigma)
+
+        return loss, identity_penalty_loss, metrics
     
     def loss(
         self,
@@ -284,12 +294,28 @@ class EqSelfDistill(nn.Module):
         equivariant_loss = 1 - torch.abs(cos_theta)
         return self.output_fn(equivariant_loss + self.eps) # QUESTION: WHAT IS THIS FUNCTION FOR (SQRT)
 
+    
+    def identity_penalty(
+        self,
+        transformations: torch.Tensor,
+        sigma: float = 0.1,
+    ) -> torch.Tensor:
+ 
+        # Extract diagonals -> (B, N)
+        diag = torch.diagonal(transformations, dim1=-2, dim2=-1)
+
+        # Peak at 1, decay away from 1
+        penalty = torch.exp(-((diag - 1.0) ** 2) / (2 * sigma ** 2))
+        return penalty
+
     @classmethod
     def build(cls, config):
         obj = cls(
             weight=config["weight"],
             transform_generation = config["transform_generation"],
             representation_type = config["representation_type"],
+            identity_penalty_factor = config["identity_penalty_factor"],
+            identity_penalty_sigma = config["identity_penalty_factor"], 
             feature_dim=config["feature_dim"],
             output_fn=config["output_fn"],
             change_base=config["change_base"],
@@ -297,7 +323,6 @@ class EqSelfDistill(nn.Module):
             use_gt = config["use_gt"]
         )
         return obj
-    
 
 class GeneratorSO3toIrreps(nn.Module):
 

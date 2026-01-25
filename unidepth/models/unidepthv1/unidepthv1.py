@@ -306,7 +306,7 @@ class UniDepthV1(
                 for offset in (0, k)
             ]
             loss = self.losses["equivariance"]
-            equivariance_losses, equivariance_metrics = loss(
+            equivariance_losses, identity_penalty_loss, equivariance_metrics = loss(
                 image = inputs["image_original"][idxs],
                 feature = outputs["cond_features"][idxs],
                 encoder_features = [output[idxs] for output in outputs["encoder_outputs"]],
@@ -320,7 +320,7 @@ class UniDepthV1(
                 log=log,
                 step=step
             )
-            losses["opt"][loss.name] = loss.weight * equivariance_losses.mean()
+            losses["opt"][loss.name] = loss.weight * (equivariance_losses.mean() + identity_penalty_loss.mean())
             losses_to_be_computed.remove("equivariance")
             metrics.update(equivariance_metrics)
 
