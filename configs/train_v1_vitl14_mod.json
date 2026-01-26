@@ -5,8 +5,8 @@
    },
    "training":{
       "n_iters": 300000,
-      "validation_interval": 1000, //1000,
-      "log_train_metrics_interval": 1,
+      "validation_interval": 20000,
+      "log_train_metrics_interval": 100,
       "batch_size":8,
       "nsteps_accumulation_gradient":2,
       "pretrained": "/unidepth/cache/models/pretrained/unidepth_v1_pytorch_model.bin",
@@ -18,7 +18,7 @@
       "cycle_beta":false,
       "wd":0.1,
       "wd_final":0.1,
-      "warmup_iters": 30000,
+      "warmup_iters": 50000,
       "ld":1.0,
       "drop_path":0.0,
       "ema":true,
@@ -142,13 +142,13 @@
          "ScanNet": 5,
          "Waymo": 2,
          // Available sequence datasets
-         "ADT": 10,
-         "ARKit": 10,
-         "ASE": 10,
-         "BEDLAM": 10,
-         "BlendedMVG": 10,
-         "Cityscape": 10,
-         "DTURMVD": 10,
+         "ADT": 1,
+         "ARKit": 3,
+         "ASE": 1,
+         "BEDLAM": 8,
+         "BlendedMVG": 2,
+         
+         "DTURMVD": 3,
          "DynReplica": 10,
          "EDEN": 3,
          // "FaceDepth": 10, // Consistently low IoU
@@ -248,7 +248,6 @@
          "KITTIMulti",
          "BlendedMVG",
          "DTURMVD",
-         "TATRMVD",
       ],
       "data_root":"datasets",
       "crop":"garg",
@@ -293,7 +292,7 @@
       "pixel_encoder":{
          "name":"dinov2_vitl14",
          "norm":true,
-         "pretrained":"cache/models/pretrained/dinov2_vitl14_pretrain_unidepth.pth",
+         "pretrained": "", // "cache/models/pretrained/dinov2_vitl14_pretrain_unidepth.pth",
          "lr":1e-5,
          "frozen_stages":0
       }
