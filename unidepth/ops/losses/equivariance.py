@@ -271,7 +271,7 @@ class EqSelfDistill(nn.Module):
                 dummy = dummy + (p.sum() * 0.0)
             loss = dummy
 
-        identity_penalty_loss = torch.zeros(0, device=device)
+        identity_penalty_loss = torch.zeros(1, device=device)
         if self.identity_penalty_factor != 0.0 and len(transformations) != 0:
             transformations = torch.stack(transformations, dim=0)
             identity_penalty_loss = self.identity_penalty_factor * self.identity_penalty(transformations, self.identity_penalty_sigma)
