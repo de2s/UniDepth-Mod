@@ -322,7 +322,7 @@ class UniDepthV1(
             )
             losses["opt"][loss.name] = loss.weight * equivariance_losses.mean()
             if identity_penalty_loss is not None:
-                losses["opt"]["identity_penalty_loss"] = loss.weight * identity_penalty_loss.mean()
+                losses["opt"]["identity_penalty_loss"] = loss.identity_penalty_factor * identity_penalty_loss.mean()
             losses_to_be_computed.remove("equivariance")
             metrics.update(equivariance_metrics)
 

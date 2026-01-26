@@ -66,7 +66,7 @@ class EqSelfDistill(nn.Module):
         patch_size=14,
         log = False,
         step = -1
-    ) -> Tuple[torch.Tensor, torch.Tensor, dict]:
+    ) -> Tuple[torch.Tensor, torch.Tensor | None, dict]:
 
         # Copy log variable because this function should only log the first iteration
         should_log = log
@@ -271,10 +271,14 @@ class EqSelfDistill(nn.Module):
                 dummy = dummy + (p.sum() * 0.0)
             loss = dummy
 
-        identity_penalty_loss = torch.zeros(1, device=device)
-        if self.identity_penalty_factor != 0.0 and len(transformations) != 0:
-            transformations = torch.stack(transformations, dim=0)
-            identity_penalty_loss = self.identity_penalty_factor * self.identity_penalty(transformations, self.identity_penalty_sigma)
+        # Compute identity penalty loss
+        identity_penalty_loss = None
+        if self.identity_penalty_factor != 0.0:
+            if len(transformations) != 0:
+                transformations = torch.stack(transformations, dim=0)
+                identity_penalty_loss = self.identity_penalty_loss(transformations, self.identity_penalty_sigma)
+            else:
+                identity_penalty_loss = torch.zeros(1, device=device)
 
         return loss, identity_penalty_loss, metrics
     
@@ -295,7 +299,7 @@ class EqSelfDistill(nn.Module):
         return self.output_fn(equivariant_loss + self.eps) # QUESTION: WHAT IS THIS FUNCTION FOR (SQRT)
 
     
-    def identity_penalty(
+    def identity_penalty_loss(
         self,
         transformations: torch.Tensor,
         sigma: float = 0.1,
