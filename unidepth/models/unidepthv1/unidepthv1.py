@@ -314,7 +314,7 @@ class UniDepthV1(
                 intrinsics = inputs["camera"].K[idxs],
                 estimated_depth = outputs["depth"][idxs],
                 estimated_intrinsics = outputs["intrinsics"][idxs],
-                extrinsics = inputs["cam2w"][idxs],
+                poses = inputs["cam2w"][idxs],
                 mask = inputs["depth_mask"][idxs],
                 flips = flips[idxs],
                 log=log,
