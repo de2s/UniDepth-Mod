@@ -39,7 +39,7 @@ class BaseDataset(Dataset):
         self.benchmark = benchmark
         self.split_file = split_file
         self.test_mode = test_mode
-        self.data_root = os.environ["DATAROOT"]
+        self.data_root = os.environ["DATASETS"]
         self.image_shape = image_shape
         self.resize_method = resize_method
         self.mini = mini

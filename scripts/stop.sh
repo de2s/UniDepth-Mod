@@ -1,8 +1,8 @@
 #!/bin/bash
 
 REPO=`pwd`
-CACHE="$REPO/cache"
-PID_FILE="$CACHE/unidepth.pid"
+CACHE="${DATA}/cache"
+PID_FILE="${CACHE}/unidepth.pid"
 
 if [[ -f "$PID_FILE" ]]; then
     PID=$(cat "$PID_FILE")

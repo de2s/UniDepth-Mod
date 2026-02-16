@@ -16,8 +16,10 @@ _aim_run = None
 def getAimRun(run_hash=None):
     global _aim_run
     if _aim_run is None:
-        _aim_run = Run(experiment="unidepth", repo="/data/aim", run_hash=run_hash)
-        _aim_run.set_artifacts_uri("file:///data/aim/artifacts")
+        data = os.environ["DATA"]
+        repo = os.path.join(data, "aim")
+        _aim_run = Run(experiment="unidepth", repo=repo, run_hash=run_hash)
+        _aim_run.set_artifacts_uri(f"file:///{data}/aim/artifacts")
     return _aim_run
 
 def log_equivariant_loss_artifacts(

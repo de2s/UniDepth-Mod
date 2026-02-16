@@ -1,16 +1,21 @@
 services:
-  unidepth-dev:
+  unidepth:
     build:
       context: .
       dockerfile: Dockerfile
       args:
+        TORCH_CUDA_ARCH_LIST: 8.6
         USER_UID: 1000
         USER_GID: 1000
+        
     ports:
       - "43800:43800"
     volumes:
       - /mnt/data2/Volumes/unidepth-dev-data:/data
       - /mnt/data1/datasets:/data/datasets
+    environment:
+      - DATASETS: /data/datasets
+      - DATA: /data
     deploy:
       resources:
         reservations:

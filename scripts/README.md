@@ -11,7 +11,7 @@ export TMPDIR="/tmp"
 export TORCH_HOME=${TMPDIR}
 export HUGGINGFACE_HUB_CACHE=${TMPDIR}
 export WANDB_HOME=${TMPDIR}
-export DATAROOT=<where-you-stored-the-hdf5>
+export DATASETS=<where-you-stored-the-hdf5>
 
 
 export MASTER_PORT=$((( RANDOM % 600 ) + 29400 ))

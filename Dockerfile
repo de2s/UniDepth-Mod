@@ -5,6 +5,7 @@ FROM pytorch/pytorch:2.2.0-cuda11.8-cudnn8-devel
 ARG USERNAME=unidepth
 ARG USER_UID=1000
 ARG USER_GID=1000
+ARG TORCH_CUDA_ARCH_LIST=8.9
 
 # Install OS requirements
 RUN apt update \
@@ -13,7 +14,10 @@ RUN apt update \
 # Install Python requirements
 WORKDIR /unidepth
 COPY requirements.txt .
-RUN FORCE_CUDA=1 TORCH_CUDA_ARCH_LIST=8.9 pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cu118
+RUN FORCE_CUDA=1 \
+    TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH_LIST} \
+    pip install -r requirements.txt \
+    --extra-index-url https://download.pytorch.org/whl/cu118
 
 # Install Pillow-SIMD (Optional)
 RUN pip uninstall pillow -y

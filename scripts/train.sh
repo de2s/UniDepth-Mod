@@ -4,13 +4,12 @@ export REPO=`pwd`
 export PYTHONPATH=${REPO}:${PYTHONPATH}
 
 # Adapt all this to your setup
-# export TMPDIR="/tmp"
-export CACHE="$REPO/cache"
+export CACHE="${DATA}/cache"
 export TORCH_HOME=${CACHE}
 export HUGGINGFACE_HUB_CACHE=${CACHE}
 export WANDB_HOME=${CACHE}
-export DATAROOT="/data/datasets"
-export DATA="/data"
+#export DATASETS="/data/datasets"
+#export DATA="/data"
 
 # this is the config will be used
 export CFG="train_v1_vitl14_mod.json"

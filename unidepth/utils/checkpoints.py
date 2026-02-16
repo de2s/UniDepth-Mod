@@ -6,7 +6,7 @@ import torch
 
 from unidepth.utils.distributed import is_main_process
 
-checkpoint_file = os.path.join(os.environ["CACHE"], "checkpoints/unidepth_checkpoint.pth")
+checkpoint_file = os.path.join(os.environ["DATA"], "checkpoints/unidepth_checkpoint.pth")
 
 def save_checkpoint(model, optimizer, step, wandb_run_id, wandb_run_name, aim_run_hash): #, , scheduler, step, wandb_id, aim_hash): scheduler_wd, scheduler_lr, scheduler_betas
 
