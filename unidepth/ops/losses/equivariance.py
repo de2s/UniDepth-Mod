@@ -18,7 +18,7 @@ from .utils import FNS
 
 class EqSelfDistill(nn.Module):
 
-    def __init__(self, weight: float, transform_generation: str, representation_type: str, identity_penalty_factor: float, identity_penalty_sigma: float, feature_dim: int, output_fn: str = "sqrt",  eps: float = 1e-5, change_base: bool = False, inverse_change_base: bool = False, use_gt: bool = True):
+    def __init__(self, weight: float, transform_generation: str, representation_type: str, identity_penalty_factor: float, identity_penalty_sigma: float, feature_dim: int, output_fn: str = "sqrt",  eps: float = 1e-5, change_base: bool = False, inverse_change_base: bool = False, use_gt: bool = True, init_std_dev: float = 1e-3):
         super().__init__()
         self.name: str = self.__class__.__name__
         self.weight: float = weight
@@ -33,6 +33,7 @@ class EqSelfDistill(nn.Module):
         self.inverse_change_base = inverse_change_base
         self.eps: float = eps
         self.use_gt = use_gt
+        self.init_std_dev = init_std_dev
 
         # Validate parameters
         if change_base == False and inverse_change_base == True:
@@ -46,7 +47,7 @@ class EqSelfDistill(nn.Module):
         if self.transform_generation == "SO(3)->Irreps":
             self.transform_generator = GeneratorSO3toIrreps(representation_type)
         elif self.transform_generation == "SO(3)->SO(n)":
-            self.transform_generator = GeneratorSO3toSOn(self.feature_dim)
+            self.transform_generator = GeneratorSO3toSOn(self.feature_dim, self.init_std_dev)
         elif self.transform_generation == "Generator->SO(n)":
             self.transform_generator = GeneratorGtoSOn(self.feature_dim)
 
@@ -60,7 +61,7 @@ class EqSelfDistill(nn.Module):
         intrinsics: torch.Tensor,
         estimated_depth: torch.Tensor,
         estimated_intrinsics: torch.Tensor,
-        extrinsics: torch.Tensor,
+        poses: torch.Tensor,
         mask: torch.Tensor,
         flips: torch.Tensor,
         patch_size=14,
@@ -99,7 +100,7 @@ class EqSelfDistill(nn.Module):
         B, N, _ = points3d_flat.shape
         ones = torch.ones(B, N, 1, device=points3d_flat.device)
         points3d_flat = torch.cat([points3d_flat, ones], dim=-1)
-        points3d_flat = torch.bmm(extrinsics, points3d_flat.transpose(-2, -1))
+        points3d_flat = torch.bmm(poses, points3d_flat.transpose(-2, -1))
         points3d_flat = points3d_flat.permute(0, 2, 1)[:, :, :3]   # Drop the homogeneous coordinate
         
         # Calculate intersection over union metrics
@@ -157,7 +158,7 @@ class EqSelfDistill(nn.Module):
             points3d0, points3d1 = points3d_flat[left], points3d_flat[right]
             points2d0, points2d1 = points2d_flat[left], points2d_flat[right]
             feature0, feature1 = features_flat[left], features_flat[right]
-            extrinsics0, extrinsics1 = extrinsics[left], extrinsics[right]
+            pose0, pose1 = poses[left], poses[right]
             mask0, mask1 = mask_flat[left], mask_flat[right]
             flip0, flip1 = flips[left], flips[right]
 
@@ -236,10 +237,10 @@ class EqSelfDistill(nn.Module):
             feature1_transformed = torch.matmul(change_base, feature1.T).T
             
             # Rotate vectors
-            transformation0 = self.transform_generator.getTransformation(extrinsics0, extrinsics1, should_log, step)
+            transformation0 = self.transform_generator.getTransformation(pose0, pose1, should_log, step)
             feature0_transformed = torch.matmul(transformation0, feature0_transformed.T).T
             transformations.append(transformation0)
-            transformation1 = self.transform_generator.getTransformation(extrinsics1, extrinsics0, should_log, step)
+            transformation1 = self.transform_generator.getTransformation(pose1, pose0, should_log, step)
             feature1_transformed = torch.matmul(transformation1, feature1_transformed.T).T
             transformations.append(transformation1)
 
@@ -324,7 +325,8 @@ class EqSelfDistill(nn.Module):
             output_fn=config["output_fn"],
             change_base=config["change_base"],
             inverse_change_base=config["inverse_change_base"],
-            use_gt = config["use_gt"]
+            use_gt = config["use_gt"],
+            init_std_dev = config["init_std_dev"],
         )
         return obj
 
@@ -371,11 +373,11 @@ class GeneratorSO3toIrreps(nn.Module):
 
 class GeneratorSO3toSOn(nn.Module):
 
-    def __init__(self, feature_dim):
+    def __init__(self, feature_dim, init_std_dev):
 
         super().__init__()
         self.feature_dim = feature_dim
-        self.rotation_decoder = MonotonicAngleDecoder()
+        self.rotation_decoder = MonotonicAngleDecoder(init_std_dev=init_std_dev)
 
     def getTransformation(self, pose0: torch.Tensor, pose1: torch.Tensor, log = False, step = -1):
 
@@ -429,7 +431,8 @@ class MonotonicAngleDecoder(nn.Module):
 
     def __init__(
         self, 
-        init_value=math.pi
+        init_value=math.pi,
+        init_std_dev = 1e-3
     ):
         super().__init__()
 
@@ -440,7 +443,7 @@ class MonotonicAngleDecoder(nn.Module):
 
         # Small weights for hidden layers
         for fc in [self.fc1, self.fc2, self.fc3]:
-            nn.init.normal_(fc.weight, mean=0.0, std=1e-3)
+            nn.init.normal_(fc.weight, mean=0.0, std=init_std_dev)
         
         # Hidden biases zero
         nn.init.constant_(self.fc1.bias, 0.0)
