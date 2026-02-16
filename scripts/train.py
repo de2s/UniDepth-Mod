@@ -62,6 +62,7 @@ def main_worker(config: Dict[str, Any], args: argparse.Namespace):
 
     # Write PID to file
     if is_main_process():
+        os.makedirs(os.environ["CACHE"], exist_ok=True)
         pid_file = os.path.join(os.environ["CACHE"], "unidepth.pid")  
         with open(pid_file, "w") as f:
             f.write(str(pid))

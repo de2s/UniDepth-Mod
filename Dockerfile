@@ -1,5 +1,6 @@
 # TODO: FROM pytorch/pytorch:2.2.2-cuda11.8-cudnn8-devel
-FROM pytorch/pytorch:2.2.0-cuda11.8-cudnn8-devel
+#FROM pytorch/pytorch:2.2.0-cuda11.8-cudnn8-devel
+FROM pytorch/pytorch:2.2.2-cuda12.1-cudnn8-devel
 
 # Define customizable parameters
 ARG USERNAME=unidepth
@@ -9,7 +10,7 @@ ARG TORCH_CUDA_ARCH_LIST=8.9
 
 # Install OS requirements
 RUN apt update \
-    && DEBIAN_FRONTEND=noninteractive apt install -y sudo git python3-opencv screen
+    && DEBIAN_FRONTEND=noninteractive apt install -y sudo git python3-opencv curl screen
 
 # Install Python requirements
 WORKDIR /unidepth

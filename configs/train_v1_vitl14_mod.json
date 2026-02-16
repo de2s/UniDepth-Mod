@@ -51,7 +51,7 @@
            "output_fn": "sqrt"
          },
          "equivariance": {
-            "name": "EqSelfDistill",
+            "name": "EqSelfDistill2",
             "weight": 0.1,
             "output_fn": "sqrt",
             "feature_dim": 512,
@@ -186,7 +186,8 @@
          "VOID": 1,
          "ETH3D": 1,
        },
-       "train_datasets":[
+       "train_datasets":["ScanNet"],
+       "train_datasets_":[
          // Sequence datasets from UniDepth
          "Argoverse2",        // Used in validation (train/test)
          "ScanNet",           // Used in validation (train/test)
@@ -229,7 +230,8 @@
          // "MS2",               // Error: Invalid rotation matrixes
          // "ScanNetpp_F",       // Warning: Sequences need to be reordered 
        ],
-       "val_datasets":[
+       "val_datasets":["IBims", "ScanNet"],
+       "val_datasets_":[
          // Image datasets from UniDepth
          "DDAD",
          "DiodeIndoor",

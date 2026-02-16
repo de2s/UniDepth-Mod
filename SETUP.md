@@ -13,6 +13,12 @@ The development environment has been validated with the following software versi
 - Visual Studio Code
 - Git
 
+**Note:**
+
+If your Docker installation does not support the `docker compose` command, you need to install the Compose plugin manually. Refer to the official Docker [documentation](https://docs.docker.com/compose/install/linux/#install-the-plugin-manually) for instructions.
+
+If your Docker Buildx version is earlier than 0.17, you may need to upgrade Docker. To check your current Buildx version, run: `docker buildx version`.
+
 ## Clone the Source Code
 
 Clone the repository onto your Linux machine:
@@ -117,8 +123,8 @@ services:
       - <data_folder>:/data
       - /mnt/data1/datasets:/data/datasets
     environment:
-      - DATASETS: /data/datasets
-      - DATA: /data
+      DATA: /data
+      DATASETS: /data/datasets
     deploy:
       resources:
         reservations:
@@ -228,13 +234,19 @@ You can also adjust other Dev Containers settings in this file as needed.
 
 ## Open the Project in Dev Containers
 
-In Visual Studio Code, open the Command Palette (View > Command Palette…), then select “Dev Containers: Rebuild and Reopen in Container” to build the container and reopen the project inside it. The process may take several minutes, depending on your internet connection speed.
+In Visual Studio Code, open the Command Palette (View > Command Palette…), then select “Dev Containers: Rebuild and Reopen in Container”. This will build the container and reopen the project inside it.
+
+The process may take several minutes, depending on your internet connection speed, and requires approximately 30 GB of free disk space to complete the build.
 
 Once the project is open in the container, confirm that it has access to the host GPUs by running the `nvidia-smi` command. The output should display a summary table listing all available GPUs.
 
 ## Fix ScanNet Dataset
 
 The ScanNet dataset contains sequence frames that are not in chronological order. To train UniDepth with the equivariance loss, the frames must be properly ordered. To resolve this, run the `scripts/fix_scannet_dataset.py` script using a Visual Studio Code Terminal to ensure the command is executed within the container.
+
+```bash
+python ./scripts/fix_scannet_dataset.py
+```
 
 This script will modify the original file in place. While reordering the frames does not affect Unidepth original functionality, it may impact the exact reproducibility of experiments performed prior to this update.
 
@@ -243,6 +255,7 @@ This script will modify the original file in place. While reordering the frames 
 To download the pre-trained weights for the UniDepth model, run the following command using a Visual Studio Code Terminal to ensure the command is executed within the container:
 
 ```bash
+mkdir -p "$DATA/models/pretrained"
 curl -L "https://huggingface.co/lpiccinelli/unidepth-v1-vitl14/resolve/main/pytorch_model.bin" -o "$DATA/models/pretrained/unidepth_v1_pytorch_model.bin"
 ```
 
@@ -253,6 +266,14 @@ Ensure that the path to the pre-trained weights is correctly set in the `trainin
 
 Optionally, before starting the training of UniDepth model, you can initialize the experiment tracking tool Aim by running the `scripts/aim.sh` script. Use a dedicated Visual Studio Code terminal to ensure it runs continuously inside the container.
 
-o access the Aim interface, open the following URL `http://<linux_host>:43800/` in your browser, where `<linux_host>` is the IP address or domain name of the Linux machine running the container.
+```bash
+./scripts/aim.sh
+```
+
+To access the Aim interface, open the following URL `http://<linux_host>:43800/` in your browser, where `<linux_host>` is the IP address or domain name of the Linux machine running the container.
 
 To train UniDepth, run the `scripts/train.sh` script, also using a dedicated Visual Studio Code Terminal to ensure execution within the container.
+
+The first time you run the training script, you will be prompted to enable Weights & Biases experiment tracking. Please select option 2, then paste your API key when prompted.
+
+**[TODO: ELEGIR BIEN EL TAG DE LA IMAGEN DEL CONTENERDOR]**

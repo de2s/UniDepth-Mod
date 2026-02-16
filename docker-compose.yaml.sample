@@ -14,8 +14,8 @@ services:
       - /mnt/data2/Volumes/unidepth-dev-data:/data
       - /mnt/data1/datasets:/data/datasets
     environment:
-      - DATASETS: /data/datasets
-      - DATA: /data
+      DATA: /data
+      DATASETS: /data/datasets
     deploy:
       resources:
         reservations:
