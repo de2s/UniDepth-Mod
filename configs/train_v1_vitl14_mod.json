@@ -4,9 +4,9 @@
       "deterministic":true
    },
    "training":{
-      "n_iters": 300000,
-      "validation_interval": 20000,
-      "log_train_metrics_interval": 100,
+      "n_iters": 100,//300000,
+      "validation_interval": 1000, //1000,
+      "log_train_metrics_interval": 1,
       "batch_size":8,
       "nsteps_accumulation_gradient":2,
       "pretrained": "/data/models/pretrained/unidepth_v1_pytorch_model.bin",
@@ -18,7 +18,7 @@
       "cycle_beta":false,
       "wd":0.1,
       "wd_final":0.1,
-      "warmup_iters": 50000,
+      "warmup_iters": 30000,
       "ld":1.0,
       "drop_path":0.0,
       "ema":true,
@@ -119,42 +119,41 @@
       "sampling_mode": "neighboor", // "continuous" or "neighboor"
       "sampling_window_size": {
          // Sequence datasets from UniDepth
-         "Argoverse2": 3,
-         "ScanNet": 5,
-         "Waymo": 2,
+         "Argoverse2": 10,
+         "ScanNet": 10,
+         "Waymo": 10,
          // Available sequence datasets
-         "ADT": 1,
-         "ARKit": 3,
-         "ASE": 1,
-         "BEDLAM": 8,
-         "BlendedMVG": 2,
-         
-         "DTURMVD": 3,
+         "ADT": 10,
+         "ARKit": 10,
+         "ASE": 10,
+         "BEDLAM": 10,
+         "BlendedMVG": 10,
+         "Cityscape": 10,
+         "DTURMVD": 10,
          "DynReplica": 10,
-         "EDEN": 3,
-         // "FaceDepth": 10, // Consistently low IoU
-         "HM3D": 4,
-         "HOI4D": 5,
+         "EDEN": 10,
+         "FaceDepth": 10,
+         "HM3D": 10,
+         "HOI4D": 10,
          "KITTIMulti": 10,
-         "MatrixCity": 1,
-         "MidAir": 5,
-         "MIP": 2,
-         "MVImgNet": 7,
-         // "MVSynth": 10, // Consistently low IoU
-         // "NeRDS360": 10, // Consistently low IoU
-         "NianticMapFree": 2,
-         "PointOdyssey": 5,
-         "ScanNet": 5,
-         "ScanNetpp": 2,
-         "Sintel": 5,
-         "TartanAir": 5,
-         // "TATRMVD": 10, // Consistently low IoU
+         "MatrixCity": 10,
+         "MidAir": 10,
+         "MIP": 10,
+         "MVImgNet": 10,
+         "MVSynth": 10,
+         "NeRDS360": 10,
+         "NianticMapFree": 10,
+         "PointOdyssey": 10,
+         "ScanNet": 10,
+         "ScanNetpp": 10,
+         "Sintel": 10,
+         "TartanAir": 10,
+         "TATRMVD": 10,
          "Theo": 10,
-         // "UnrealStereo4K": 10, // Consistently low IoU
-         "Waymo": 2,
-         "WildRGBD": 2,
+         "UnrealStereo4K": 10,
+         "Waymo": 10,
+         "WildRGBD": 10,
          // Image datasets from UniDepth
-         "Cityscape": 1,
          "DDAD": 1,
          "DiodeIndoor": 1,
          "HAMMER": 1,
@@ -165,8 +164,53 @@
          "SUNRGBD": 1,
          "VOID": 1,
          "ETH3D": 1,
-       },
-       "train_datasets":[
+      },
+      "train_datasets":["ScanNet"],
+      "train_datasets_":[
+         "KITTI", //TEMP
+         // Sequence datasets from UniDepth
+         "Argoverse2",        // Used in validation (train/test)
+         "ScanNet",           // Used in validation (train/test)
+         "Waymo",             // Used in validation (train/test)
+         // Available sequence datasets
+         // NOT USED "ADT",
+         "ARKit",
+         // NOT USED "ASE",
+         // NOT USED "BEDLAM",
+         "BlendedMVG",     // Used in validation (Zero Shot)
+         "DTURMVD",        // Used in validation (Zero Shot)
+         // NOT USED "DynReplica",
+         // NOT USED "EDEN",
+         // NOT USED "FaceDepth",
+         "HM3D",
+         "HOI4D",
+         "KITTIMulti",     // Used in validation (Zero Shot)
+         // NOT USED "MatrixCity",
+         // NOT USED "MidAir",
+         // NOT USED "MIP",
+         "MVImgNet",
+         // NOT USED "MVSynth",
+         // NOT USED "NeRDS360",
+         "NianticMapFree",
+         // NOT USED "PointOdyssey",
+         // NOT USED "ScanNetpp",
+         // NOT USED "Sintel",
+         // NOT USED "TartanAir",
+         // NOT USED "TATRMVD",        // Used in validation (Zero Shot)
+         // NOT USED "Theo",
+         // NOT USED "UnrealStereo4K",
+         "WildRGBD",
+         // Still unavailable
+         // "Deep360",           // Error: Unexpected keyword argument 'test_mode' in PanoRoll method
+         // "FutureHouse",       // Error: Unexpected keyword argument 'test_mode' in PanoRoll method
+         // "Gibson",            // Error: Unexpected keyword argument 'test_mode' in PanoRoll method
+         // "KITTI360",          // Warning: Generates a lot of NaN gradients
+         // "Matterport3D",      // Error: Unexpected keyword argument 'test_mode' in PanoRoll method
+         // "MegaDepthS",        // Warning: Sequences contain images with multiple resolutions causing multiple errors.
+         // "MS2",               // Error: Invalid rotation matrixes
+         // "ScanNetpp_F",       // Warning: Sequences need to be reordered 
+      ],
+      "train_datasets_":[
          // Sequence datasets from UniDepth
          "Argoverse2",        // Used in validation (train/test)
          "ScanNet",           // Used in validation (train/test)
@@ -194,7 +238,7 @@
          // "PointOdyssey",
          // "ScanNetpp",
          // "Sintel",
-         // "TartanAir",
+         //"TartanAir",
          // "TATRMVD",        // Used in validation (Zero Shot)
          // "Theo",
          // "UnrealStereo4K",
@@ -208,8 +252,9 @@
          // "MegaDepthS",        // Warning: Sequences contain images with multiple resolutions causing multiple errors.
          // "MS2",               // Error: Invalid rotation matrixes
          // "ScanNetpp_F",       // Warning: Sequences need to be reordered 
-       ],
-       "val_datasets":[
+      ],
+      "val_datasets":["IBims", "ScanNet"],
+      "val_datasets_":[
          // Image datasets from UniDepth
          "DDAD",
          "DiodeIndoor",
@@ -229,6 +274,7 @@
          "KITTIMulti",
          "BlendedMVG",
          "DTURMVD",
+         "TATRMVD",
       ],
       "data_root":"datasets",
       "crop":"garg",
@@ -273,7 +319,7 @@
       "pixel_encoder":{
          "name":"dinov2_vitl14",
          "norm":true,
-         "pretrained": "", // "cache/models/pretrained/dinov2_vitl14_pretrain_unidepth.pth",
+         "pretrained":"cache/models/pretrained/dinov2_vitl14_pretrain_unidepth.pth",
          "lr":1e-5,
          "frozen_stages":0
       }
