@@ -9,7 +9,7 @@
       "log_train_metrics_interval": 100,
       "batch_size":8,
       "nsteps_accumulation_gradient":2,
-      "pretrained": "/unidepth/cache/models/pretrained/unidepth_v1_pytorch_model.bin",
+      "pretrained": "/data/models/pretrained/unidepth_v1_pytorch_model.bin",
       "checkpoint_interval": 1000,
       "use_checkpoint":false,
       "lr":1e-4,
@@ -68,26 +68,6 @@
             "use_gt": true,
             "init_std_dev": 0.001
          },
-         /*"equivariance": {
-            "name": "EqSelfDistillMultiStage",
-            "weight": 0.1,
-            "feature_weight": 1,
-            "encoder_feature_indexes": [0, 6, 12, 18],
-            "encoder_feature_weights": [1, 1,  1,  1],
-            "feature_weight": 1.0,
-            "output_fn": "sqrt",
-            "feature_dim": 512,
-            "encoder_feature_dim": 1024,
-            "change_base": false,
-            "inverse_change_base": false,
-            //"transform_generation": "SO(3)->Irreps",
-            "representation_type": null,
-            //"representation_type": "512x0e", 
-            //"representation_type": "1x0e+1x255e",
-            "transform_generation": "SO(3)->SO(n)",
-            //"transform_generation": "Generator->SO(n)",
-            "use_gt": true
-         }*/
       }
    },
    "data":{
@@ -186,8 +166,7 @@
          "VOID": 1,
          "ETH3D": 1,
        },
-       "train_datasets":["ScanNet"],
-       "train_datasets_":[
+       "train_datasets":[
          // Sequence datasets from UniDepth
          "Argoverse2",        // Used in validation (train/test)
          "ScanNet",           // Used in validation (train/test)
@@ -230,8 +209,7 @@
          // "MS2",               // Error: Invalid rotation matrixes
          // "ScanNetpp_F",       // Warning: Sequences need to be reordered 
        ],
-       "val_datasets":["IBims", "ScanNet"],
-       "val_datasets_":[
+       "val_datasets":[
          // Image datasets from UniDepth
          "DDAD",
          "DiodeIndoor",

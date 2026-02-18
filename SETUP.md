@@ -102,6 +102,53 @@ To run the UniDepth training pipeline in Docker from Visual Studio Code, install
 
 Before using Visual Studio Code with Dev Containers, you need to configure certain files to ensure it functions properly in your development environment.
 
+__File `Dockerfile`:__
+
+The Dockerfile has been validated in an environment equipped with an NVIDIA RTX 5000 Ada GPU. If you are using a GPU with a different architecture, review the following considerations:
+
+- CUDA Version: The Docker container is based on the PyTorch image `pytorch/pytorch:2.2.2-cuda12.1-cudnn8-devel`, which uses CUDA 12.1 and is compatible with UniDepth’s specific dependencies. If your GPU requires a different CUDA version, modify the first line of the `Dockerfile` to reference the appropriate PyTorch image. Additionally, ensure that the selected image is compatible with the CUDA version installed on your Linux host system.
+- GPU Hardware Architecture: Verify that the `TORCH_CUDA_ARCH_LIST` build argument matches your GPU’s compute capability. Refer to the [NVIDIA documentation](https://developer.nvidia.com/cuda/gpus) to determine the correct architecture value for your hardware.
+- PyTorch Wheel Index URL: In the instruction that installs the Python dependencies, update the `--extra-index-url https://download.pytorch.org/whl/cu121` argument to match the CUDA version used by your selected container image. For example, `cu121` corresponds to CUDA 12.1. Adjust this suffix accordingly if you use a different CUDA version.
+
+```dockerfile
+FROM pytorch/pytorch:2.2.2-cuda12.1-cudnn8-devel
+
+# Define customizable parameters
+ARG USERNAME=unidepth
+ARG USER_UID=1000
+ARG USER_GID=1000
+ARG TORCH_CUDA_ARCH_LIST=8.9
+
+# Install OS requirements
+RUN apt update \
+    && DEBIAN_FRONTEND=noninteractive apt install -y sudo git python3-opencv curl screen
+
+# Install Python requirements
+WORKDIR /unidepth
+COPY requirements.txt .
+RUN FORCE_CUDA=1 \
+    TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH_LIST} \
+    pip install -r requirements.txt \
+    --extra-index-url https://download.pytorch.org/whl/cu121
+
+# Install Pillow-SIMD (Optional)
+RUN pip uninstall pillow -y
+RUN CC="cc -mavx2" pip install -U --force-reinstall pillow-simd
+
+# Install Unidepth
+COPY . .
+RUN pip install -e .
+
+# Create non root user
+RUN groupadd --gid ${USER_GID} ${USERNAME} \
+    && useradd --uid ${USER_UID} --gid ${USER_GID} -m ${USERNAME} \
+    && chown -R ${USERNAME}:${USERNAME} /unidepth
+RUN echo "${USERNAME} ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+
+# Switch to non root user
+USER ${USERNAME}
+```
+
 __File `docker-compose.yaml`:__
 
 Duplicate the docker-compose.yaml.sample file as docker-compose.yaml and update the following values below to match your environment:
@@ -113,15 +160,14 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
-        TORCH_CUDA_ARCH_LIST: 8.6
         USER_UID: 1000
         USER_GID: 1000
         
     ports:
       - "43800:43800"
     volumes:
-      - <data_folder>:/data
-      - /mnt/data1/datasets:/data/datasets
+      - <DATA_FOLDER>:/data
+      - <DATASETS_FOLDER>:/data/datasets
     environment:
       DATA: /data
       DATASETS: /data/datasets
@@ -134,11 +180,11 @@ services:
               capabilities: [gpu]
 ```
 
-- The `TORCH_CUDA_ARCH_LIST` argument should match your GPU architecture. Refer to the [NVIDIA documentation](https://developer.nvidia.com/cuda/gpus) for details.
+- Service Name: If you plan to run multiple instances of the container, rename the service (currently `unidepth`) to a unique name for each instance.
+- `USER_UID` and `USERGID`: Specify the user ID (UID) and group ID (GID) of the Linux system user who owns the data and datasets directories.
 - Volumes:
   - <DATA_FOLDER> should be replaced with the path to the folder you created for storing data.
   - <DATASETS_FOLDER> should be replaced with the path to the folder where you copied the dataset files.
-- Service Name: If you plan to run multiple instances of the container, rename the service (currently `unidepth`) to a unique name for each instance.
 
 __File `.devcontainer/docker-compose.yaml`:__
 
@@ -261,10 +307,18 @@ curl -L "https://huggingface.co/lpiccinelli/unidepth-v1-vitl14/resolve/main/pyto
 
 Ensure that the path to the pre-trained weights is correctly set in the `training`>`pretrained` section of the training configuration file `configs/train_v1_vitl14_mod.json`.
 
+## Configure Your UniDepth Experiment
+
+Before running an experiment, adjust the parameters in the training configuration file, which can be found at `configs/train_v1_vitl14_mod.json`. If you create a new configuration file with a different name, update its path in the `scripts/train.sh` file on the corresponding line:
+
+```bash
+# This is the config file that will be used
+export CFG="train_v1_vitl14_mod.json"
+```
 
 ## Run the UniDepth Training Script
 
-Optionally, before starting the training of UniDepth model, you can initialize the experiment tracking tool Aim by running the `scripts/aim.sh` script. Use a dedicated Visual Studio Code terminal to ensure it runs continuously inside the container.
+Before starting the training of UniDepth model, you should initialize the experiment tracking tool Aim by running the `scripts/aim.sh` script. Use a dedicated Visual Studio Code terminal to ensure it runs continuously inside the container.
 
 ```bash
 ./scripts/aim.sh
@@ -274,6 +328,8 @@ To access the Aim interface, open the following URL `http://<linux_host>:43800/`
 
 To train UniDepth, run the `scripts/train.sh` script, also using a dedicated Visual Studio Code Terminal to ensure execution within the container.
 
-The first time you run the training script, you will be prompted to enable Weights & Biases experiment tracking. Please select option 2, then paste your API key when prompted.
+```bash
+./scripts/train.sh
+```
 
-**[TODO: ELEGIR BIEN EL TAG DE LA IMAGEN DEL CONTENERDOR]**
+The first time you run the training script, you will be prompted to enable Weights & Biases experiment tracking. Please select option 2, then paste your API key when prompted.

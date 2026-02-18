@@ -11,7 +11,7 @@ export WANDB_HOME=${CACHE}
 #export DATASETS="/data/datasets"
 #export DATA="/data"
 
-# this is the config will be used
+# This is the config file that will be used
 export CFG="train_v1_vitl14_mod.json"
 
 # make the following input-dependent for multi-node

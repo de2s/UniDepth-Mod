@@ -1,5 +1,3 @@
-# TODO: FROM pytorch/pytorch:2.2.2-cuda11.8-cudnn8-devel
-#FROM pytorch/pytorch:2.2.0-cuda11.8-cudnn8-devel
 FROM pytorch/pytorch:2.2.2-cuda12.1-cudnn8-devel
 
 # Define customizable parameters
@@ -18,7 +16,7 @@ COPY requirements.txt .
 RUN FORCE_CUDA=1 \
     TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH_LIST} \
     pip install -r requirements.txt \
-    --extra-index-url https://download.pytorch.org/whl/cu118
+    --extra-index-url https://download.pytorch.org/whl/cu121
 
 # Install Pillow-SIMD (Optional)
 RUN pip uninstall pillow -y
