@@ -19,7 +19,7 @@ from .utils import FNS
 
 class EqSelfDistill2(nn.Module):
 
-    def __init__(self, weight: float, transform_generation: str, representation_type: str, identity_penalty_factor: float, identity_penalty_sigma: float, feature_dim: int, output_fn: str = "sqrt",  eps: float = 1e-5, change_base: bool = False, inverse_change_base: bool = False, use_gt: bool = True, init_std_dev: float = 1e-3):
+    def __init__(self, weight: float, transform_generation: str, representation_type: str, identity_penalty_factor: float, identity_penalty_sigma: float, feature_dim: int, output_fn: str = "sqrt",  eps: float = 1e-5, change_base: bool = False, inverse_change_base: bool = False, use_gt: bool = True, init_std_dev: float = 1e-3, max_patches_match: int = -1):
         super().__init__()
         self.name: str = self.__class__.__name__
         self.weight: float = weight
@@ -35,6 +35,7 @@ class EqSelfDistill2(nn.Module):
         self.eps: float = eps
         self.use_gt = use_gt
         self.init_std_dev = init_std_dev
+        self.max_patches_match = max_patches_match
 
         # Validate parameters
         if change_base == False and inverse_change_base == True:
@@ -236,6 +237,11 @@ class EqSelfDistill2(nn.Module):
                     step = step
                 )
             
+            # HACK: Truncate the number of shapes to prevent Out of Memory errors
+            if self.max_patches_match != -1:
+                selected = torch.randperm(matches.size(0))[:self.max_patches_match]
+                matches = matches[selected]
+
             # Filter out not matched points
             feature0 = feature0[matches[:, 0]]
             feature1 = feature1[matches[:, 1]]
@@ -404,6 +410,7 @@ class EqSelfDistill2(nn.Module):
             inverse_change_base=config["inverse_change_base"],
             use_gt = config["use_gt"],
             init_std_dev = config["init_std_dev"],
+            max_patches_match = config["max_patches_match"],
         )
         return obj
 

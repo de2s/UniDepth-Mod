@@ -66,7 +66,8 @@
             "identity_penalty_factor": 0.0,
             "identity_penalty_sigma": 0.1,
             "use_gt": true,
-            "init_std_dev": 0.001
+            "init_std_dev": 0.001,
+            "max_patches_match": -1,
          },
       }
    },
