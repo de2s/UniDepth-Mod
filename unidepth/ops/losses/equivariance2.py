@@ -42,8 +42,6 @@ class EqSelfDistill2(nn.Module):
 
         if self.change_base:
             self.change_base_generator = nn.Parameter(torch.zeros(self.feature_dim,self.feature_dim))
-        else:
-            self.register_buffer("change_base_generator", torch.zeros(self.feature_dim,self.feature_dim))
 
         if self.transform_generation == "SO(3)->Irreps":
             self.transform_generator = GeneratorSO3toIrreps(representation_type)
@@ -157,8 +155,8 @@ class EqSelfDistill2(nn.Module):
         features_flat = rearrange(feature, "b c h w -> b (h w) c")
         
         # Create change of basis matrixes
-        change_base = torch.matrix_exp(self.change_base_generator)
-        change_base_inv = torch.matrix_exp(-self.change_base_generator)
+        change_base = torch.matrix_exp(self.change_base_generator) if self.change_base else None
+        change_base_inv = torch.matrix_exp(-self.change_base_generator) if self.inverse_change_base else None
 
         # Iterate samples
         features0, features1 = [], []
@@ -252,8 +250,8 @@ class EqSelfDistill2(nn.Module):
                 metrics["NumMatchedFeaturesSample"] = torch.tensor(feature0.size(0))
 
             # Change of base for the feature vectors
-            feature0_transformed = torch.matmul(change_base, feature0.T).T
-            feature1_transformed = torch.matmul(change_base, feature1.T).T
+            feature0_transformed = torch.matmul(change_base, feature0.T).T if change_base else feature0
+            feature1_transformed = torch.matmul(change_base, feature1.T).T if change_base else feature1
 
             # Get the midpoints between matches
             points3d = (points3d0 + points3d1) / 2.0
@@ -294,9 +292,8 @@ class EqSelfDistill2(nn.Module):
             print("Maximum cos(angle):", cos_angle.max().item())
 
             # Revert change of base for the feature vectors
-            if self.inverse_change_base:
-                feature0_transformed = torch.matmul(change_base_inv, feature0_transformed.T).T
-                feature1_transformed = torch.matmul(change_base_inv, feature1_transformed.T).T
+            feature0_transformed = torch.matmul(change_base_inv, feature0_transformed.T).T if change_base_inv else feature0_transformed
+            feature1_transformed = torch.matmul(change_base_inv, feature1_transformed.T).T if change_base_inv else feature1_transformed
 
             # Aggregate results
             features0.append(feature0_transformed)
