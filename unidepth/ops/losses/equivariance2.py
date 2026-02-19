@@ -55,6 +55,7 @@ class EqSelfDistill2(nn.Module):
         self,
         image: torch.Tensor, # Used only for debugging
         feature: torch.Tensor,
+        encoder_features: list,
         depth: torch.Tensor,
         intrinsics: torch.Tensor,
         estimated_depth: torch.Tensor,
