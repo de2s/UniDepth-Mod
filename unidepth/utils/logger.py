@@ -23,13 +23,13 @@ def getAimRun(run_hash=None):
     return _aim_run
 
 def log_equivariant_loss_artifacts(
-    image0, image1,
-    mask0, mask1, 
-    feature0, feature1, 
-    list_encoder_feature0, list_encoder_feature1, list_encoder_indexes,
-    points2d0, points2d1,
-    matches, 
-    step
+    image0 = None, image1 = None,
+    mask0 = None, mask1 = None, 
+    feature0 = None, feature1 = None, 
+    list_encoder_feature0 = None, list_encoder_feature1 = None,
+    points2d0 = None, points2d1 = None,
+    matches = None, 
+    step = -1
 ):
     # Get logger
     run = getAimRun()
@@ -52,7 +52,7 @@ def log_equivariant_loss_artifacts(
         }
         # Add encoder features if provided
         if list_encoder_feature0 is not None and list_encoder_feature1 is not None:
-            for index, encoder_feature_index0, encoder_feature_index1 in zip(list_encoder_feature0, list_encoder_feature1, list_encoder_indexes):
+            for index, (encoder_feature_index0, encoder_feature_index1) in enumerate(zip(list_encoder_feature0, list_encoder_feature1)):
                 save_tensors[f"encoder_feature0_index_{index}"] = encoder_feature_index0
                 save_tensors[f"encoder_feature1_index_{index}"] = encoder_feature_index1
         torch.save(

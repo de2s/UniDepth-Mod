@@ -24,6 +24,8 @@ from unidepth.utils.geometric import (generate_rays,
 from unidepth.utils.misc import get_params, match_gt
 from unidepth.utils import getAimRun
 from unidepth.utils.visualization import rescale, colorize
+from unidepth.ops.losses import match_features
+
 from aim import Image, Text, Distribution
 
 MAP_BACKBONES = {"ViTL14": "vitl14", "ConvNextL": "cnvnxtl"}
@@ -306,7 +308,7 @@ class UniDepthV1(
                 for offset in (0, k)
             ]
             loss = self.losses["equivariance"]
-            equivariance_losses, identity_penalty_loss, equivariance_metrics = loss(
+            list_features0, list_features1, list_encoder_features0, list_encoder_features1, list_points3d0, list_points3d1, list_poses0, list_poses1, list_flips0, list_flips1, matcher_metrics = match_features(
                 image = inputs["image_original"][idxs],
                 feature = outputs["cond_features"][idxs],
                 encoder_features = [output[idxs] for output in outputs["encoder_outputs"]],
@@ -317,6 +319,16 @@ class UniDepthV1(
                 poses = inputs["cam2w"][idxs],
                 mask = inputs["depth_mask"][idxs],
                 flips = flips[idxs],
+                use_gt = loss.use_gt,
+                log=log,
+                step=step
+            )
+            equivariance_losses, identity_penalty_loss = loss(
+                list_features0, list_features1, 
+                list_encoder_features0, list_encoder_features1,
+                list_points3d0, list_points3d1,
+                list_poses0, list_poses1, 
+                list_flips0, list_flips1,
                 log=log,
                 step=step
             )
@@ -324,7 +336,7 @@ class UniDepthV1(
             if identity_penalty_loss is not None:
                 losses["opt"]["identity_penalty_loss"] = loss.identity_penalty_factor * identity_penalty_loss.mean()
             losses_to_be_computed.remove("equivariance")
-            metrics.update(equivariance_metrics)
+            metrics.update(matcher_metrics)
 
         # remaining losses, we expect no more losses to be computed
         assert (

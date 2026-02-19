@@ -3,7 +3,7 @@ import ot
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Tuple
+from typing import List, Tuple
 from einops import rearrange
 from aim import Image, Distribution
 from e3nn.o3 import Irreps
@@ -51,203 +51,46 @@ class EqSelfDistill2(nn.Module):
     @torch.autocast(device_type="cuda", enabled=False, dtype=torch.float32)
     def forward(
         self,
-        image: torch.Tensor, # Used only for debugging
-        feature: torch.Tensor,
-        encoder_features: list,
-        depth: torch.Tensor,
-        intrinsics: torch.Tensor,
-        estimated_depth: torch.Tensor,
-        estimated_intrinsics: torch.Tensor,
-        poses: torch.Tensor,
-        mask: torch.Tensor,
-        flips: torch.Tensor,
-        patch_size=14,
+        list_features0: List[torch.Tensor | None], list_features1: List[torch.Tensor | None],
+        list_encoder_features0: List[List[torch.Tensor] | None], list_encoder_features1: List[List[torch.Tensor] | None],
+        list_points3d0: List[torch.Tensor | None], list_points3d1: List[torch.Tensor | None],
+        list_poses0: List[torch.Tensor | None], list_poses1: List[torch.Tensor | None],
+        list_flips0: List[torch.Tensor | None], list_flips1: List[torch.Tensor | None],
         log = False,
         step = -1
-    ) -> Tuple[torch.Tensor, torch.Tensor | None, dict]:
- 
-        # # Detach everything except features
-        # image = image.detach()
-        # #feature: torch.Tensor,
-        # #encoder_features: list,
-        # depth = depth.detach()
-        # intrinsics = intrinsics.detach()
-        # estimated_depth = estimated_depth.detach()
-        # estimated_intrinsics = estimated_intrinsics.detach()
-        # poses = poses.detach()
-        # mask = mask.detach()
-        # flips = flips.detach()
+    ) -> Tuple[torch.Tensor, torch.Tensor | None]:
 
         # Copy log variable because this function should only log the first iteration
+        device = "cuda"
         should_log = log
-        metrics = {}
 
-        # Choose between ground truth or estimated data
-        depth = depth if self.use_gt else estimated_depth
-        mask = mask if self.use_gt else torch.ones_like(mask, dtype=torch.bool)
-        K = intrinsics if self.use_gt else estimated_intrinsics
-
-        # Calculate number of patches
-        B, _, H, W = depth.shape
-        device = depth.device
-        assert W % patch_size == 0 and H % patch_size == 0
-        num_patches_x, num_patches_y = W // patch_size, H // patch_size
-
-        # Generate rays     
-        rays_flat, _ = generate_rays(K, (H, W))
-
-        # Retroproject points
-        depth_flat = rearrange(depth, "b c h w -> b (h w) c")
-        points3d_flat = torch.stack([
-            rays_flat[..., 0] * depth_flat[..., 0] / rays_flat[..., 2],
-            rays_flat[..., 1] * depth_flat[..., 0] / rays_flat[..., 2],
-            depth_flat[..., 0]
-        ], dim=-1)
-        mask_flat = rearrange(mask, "b c h w -> b (h w) c")
-        
-        # Transform to global coordinates
-        B, N, _ = points3d_flat.shape
-        ones = torch.ones(B, N, 1, device=points3d_flat.device)
-        points3d_flat = torch.cat([points3d_flat, ones], dim=-1)
-        points3d_flat = torch.bmm(poses, points3d_flat.transpose(-2, -1))
-        points3d_flat = points3d_flat.permute(0, 2, 1)[:, :, :3]   # Drop the homogeneous coordinate
-        
-        # Calculate intersection over union metrics
-        box_ious, box_ioas, box_iobs = [], [], []
-        vox_ious, vox_ioas, vox_iobs = [], [], []
-        for i in range(B // 2):
-            left, right = 2 * i, 2 * i + 1
-            mask0_flat, mask1_flat = mask_flat[left], mask_flat[right]
-            points3d0_flat, points3d1_flat = points3d_flat[left][mask0_flat.squeeze(-1)], points3d_flat[right][mask1_flat.squeeze(-1)]
-            box_iou, box_ioa, box_iob = bbox_intersections(points3d0_flat, points3d1_flat)
-            box_ious.append(box_iou); box_ioas.append(box_ioa); box_iobs.append(box_iob)
-            vox_iou, vox_ioa, vox_iob = voxelized_intersections(points3d0_flat, points3d1_flat, factor=0.1)
-            vox_ious.append(vox_iou); vox_ioas.append(vox_ioa); vox_iobs.append(vox_iob)
-        box_ious = torch.cat([t.unsqueeze(0) for t in box_ious], dim=0); box_ioas = torch.cat([t.unsqueeze(0) for t in box_ioas], dim=0); box_iobs = torch.cat([t.unsqueeze(0) for t in box_iobs], dim=0)
-        vox_ious = torch.cat([t.unsqueeze(0) for t in vox_ious], dim=0); vox_ioas = torch.cat([t.unsqueeze(0) for t in vox_ioas], dim=0); vox_iobs = torch.cat([t.unsqueeze(0) for t in vox_iobs], dim=0)
-
-        # Log input point cloud
-        if should_log:
-            metrics["BoxIntersectionOverUnionSample"] = box_ious[0]
-            metrics["VoxIntersectionOverUnionSample"] = vox_ious[0]
-            save_point_cloud(
-                f"artifacts/train/point_cloud_{step:06d}",
-                torch.cat([points3d_flat[0], points3d_flat[1]], dim=0),
-                torch.cat([
-                    torch.tensor([0, 255, 0], dtype=torch.uint8).repeat(points3d_flat[0].shape[0], 1),
-                    torch.tensor([255, 0, 0], dtype=torch.uint8).repeat(points3d_flat[1].shape[0], 1)
-                    ],
-                    dim=0
-                )
-            )
-
-        # Choose the ray closest to the patch center
-        rays = rearrange(rays_flat, "b (h w) c -> b c h w", h=H, w=W)
-        points3d = rearrange(points3d_flat, "b (h w) c -> b c h w", h=H, w=W) 
-        depth, rays, points3d, mask, points2d = gather_nearest_patch_center_samples(depth, rays, points3d, mask, patch_size)        
-
-        # Flatten tensors                                     
-        # depth_flat = rearrange(depth, "b c h w -> b (h w) c")
-        # rays_flat = rearrange(rays, "b c h w -> b (h w) c")
-        points3d_flat = rearrange(points3d, "b c h w -> b (h w) c")
-        mask_flat = rearrange(mask, "b c h w -> b (h w) c")
-        points2d_flat = rearrange(points2d, "b c h w -> b (h w) c")
-        features_flat = rearrange(feature, "b c h w -> b (h w) c")
-        
         # Create change of basis matrixes
         change_base = torch.matrix_exp(self.change_base_generator) if self.change_base else None
         change_base_inv = torch.matrix_exp(-self.change_base_generator) if self.inverse_change_base else None
 
-        # Iterate samples
+        # Iterate pairs of samples
         features0, features1 = [], []
         transformations = []
-        num_pairs = B // 2
-        for i in range(num_pairs):
-            left, right = 2 * i, 2 * i + 1
-            image0, image1 = (image[left], image[right]) if image is not None else (None, None)
-            points3d0, points3d1 = points3d_flat[left], points3d_flat[right]
-            points2d0, points2d1 = points2d_flat[left], points2d_flat[right]
-            feature0, feature1 = features_flat[left], features_flat[right]
-            pose0, pose1 = poses[left], poses[right]
-            mask0, mask1 = mask_flat[left], mask_flat[right]
-            flip0, flip1 = flips[left], flips[right]
+        for feature0, feature1, points3d0, points3d1, pose0, pose1, flip0, flip1 in zip(list_features0, list_features1, list_points3d0, list_points3d1, list_poses0, list_poses1, list_flips0, list_flips1):
 
             # Check that both images were rotated together
             assert flip0 == flip1
-
-            # Skip pair if cloud points doesn't intersect
-            if vox_ious[i] < 0.2:
-                print(f"Warning: Skip pair of frames because IoU is too low: {vox_ious[i]}")
+            if flip0:
+                print(f"Warning: Pair of flipped images.")
+        
+            if feature0 == None and feature1 == None:
                 continue
 
-            if self.use_gt:
-                mask0, mask1 = mask0.squeeze(), mask1.squeeze()
-                points3d0 = points3d0[mask0]
-                points3d1 = points3d1[mask1]
-                points2d0 = points2d0[mask0]
-                points2d1 = points2d1[mask1]
-                feature0 = feature0[mask0]
-                feature1 = feature1[mask1]
+            # Verify shapes
+            assert feature0.shape == feature1.shape and points3d0.shape == points3d1.shape and pose0.shape == pose1.shape and flip0 == flip1
 
-            # Log number of points    
-            if should_log:
-                metrics["NumSelectedPointsSample"] = torch.tensor(points3d0.size(0) + points3d1.size(0))
-
-            # Calculate matrix of distances between 3D points
-            distances = torch.cdist(points3d0, points3d1, p=2)
-
-            # Compute matching plan 
-            reg = 0.05       # entropy regularization
-            reg_m = 1.0      # mass relaxation for unbalanced OT
-            A = torch.ones(points3d0.shape[0], device=points3d0.device)
-            B = torch.ones(points3d1.shape[0], device=points3d1.device)
-            A /= A.sum()
-            B /= B.sum()            
-            # defaults: method='sinkhorn', reg_type='kl', numItermax=1000, stopThr=1e-6, verbose=False
-            plan = ot.unbalanced.sinkhorn_unbalanced(A, B, distances, reg, reg_m) # TODO: CHECK DISTANCE SQUARED
-            
-            # Calculate costs using unbalanced optimal transport
-            matches_a = torch.argmax(plan, dim=1)  # For each A[i], best B[j]
-            matches_b = torch.argmax(plan, dim=0)  # For each B[i], best A[j]
-
-            # Get mutual matches
-            matches_a_indices = torch.arange(matches_a.size(0), device=device)
-            mutual_mask = matches_b[matches_a] == matches_a_indices  # only keep if mutual
-            matches = torch.stack([matches_a_indices[mutual_mask], matches_a[mutual_mask]], dim=1)
-
-            # Skip if there is not matches
-            if len(matches) == 0:
-                continue
-
-            # Log artifacts if needed
-            if should_log:
-
-                print("Logging Artifacts.")
-
-                log_equivariant_loss_artifacts(
-                    image0=image0, image1=image1, 
-                    mask0=rearrange(mask0, "(h w) -> h w", h=num_patches_y, w=num_patches_x), mask1=rearrange(mask1, "(h w) -> h w", h=num_patches_y, w=num_patches_x), 
-                    feature0=feature0, feature1=feature1,
-                    list_encoder_feature0=None, list_encoder_feature1=None, list_encoder_indexes=None,
-                    points2d0=points2d0, points2d1=points2d1,
-                    matches=matches,
-                    step = step
-                )
-            
             # HACK: Truncate the number of shapes to prevent Out of Memory errors
             if self.max_patches_match != -1:
-                selected = torch.randperm(matches.size(0))[:self.max_patches_match]
-                matches = matches[selected]
-
-            # Filter out not matched points
-            feature0 = feature0[matches[:, 0]]
-            feature1 = feature1[matches[:, 1]]
-            points3d0 = points3d0[matches[:, 0]]
-            points3d1 = points3d1[matches[:, 1]]
-
-            # Track number of matched points
-            if should_log:
-                metrics["NumMatchedFeaturesSample"] = torch.tensor(feature0.size(0))
+                selected = torch.randperm(feature0.size(0))[:self.max_patches_match] 
+                feature0 = feature0[selected]
+                feature1 = feature1[selected]
+                points3d0 = points3d0[selected]
+                points3d1 = points3d1[selected]
 
             # Change of base for the feature vectors
             feature0_transformed = torch.matmul(change_base, feature0.T).T if change_base else feature0
@@ -327,7 +170,7 @@ class EqSelfDistill2(nn.Module):
             else:
                 identity_penalty_loss = torch.zeros(1, device=device)
 
-        return loss, identity_penalty_loss, metrics
+        return loss, identity_penalty_loss
 
     def loss(
         self,
