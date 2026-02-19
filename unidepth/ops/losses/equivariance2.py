@@ -3,7 +3,6 @@ import ot
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.utils.checkpoint import checkpoint
 from typing import Tuple
 from einops import rearrange
 from aim import Image, Distribution
