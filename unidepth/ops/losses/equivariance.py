@@ -307,6 +307,7 @@ class EqSelfDistill(nn.Module):
  
         # Extract diagonals -> (B, N)
         diag = torch.diagonal(transformations, dim1=-2, dim2=-1)
+        diag = torch.abs(diag)
 
         # Peak at 1, decay away from 1
         penalty = torch.exp(-((diag - 1.0) ** 2) / (2 * sigma ** 2))
