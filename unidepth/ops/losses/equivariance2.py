@@ -77,8 +77,6 @@ class EqSelfDistill2(nn.Module):
 
             # Check that both images were rotated together
             assert flip0 == flip1
-            if flip0:
-                print(f"Warning: Pair of flipped images.")
         
             if feature0 == None and feature1 == None:
                 continue
