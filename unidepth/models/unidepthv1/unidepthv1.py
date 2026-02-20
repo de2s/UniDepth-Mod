@@ -282,10 +282,12 @@ class UniDepthV1(
         if "invariance" in losses_to_be_computed:
             flips = torch.tensor([meta.get("flip", False) for meta in image_metas], device=self.device).reshape(-1, 1)
             idxs = [
-                i * meta["num_copies"] * meta["num_frames"] + j + offset
-                for i, meta in enumerate(image_metas)
-                for j in range(meta["num_frames"])
-                for offset in (0, meta["num_frames"])
+                m * meta["num_copies"] * meta["num_frames"] +
+                c * meta["num_frames"] +
+                f
+                for m, meta in enumerate(image_metas)
+                for f in range(meta["num_frames"])
+                for c in range(meta["num_copies"])
             ]
             loss = self.losses["invariance"]
             invariance_losses = loss(
@@ -301,11 +303,12 @@ class UniDepthV1(
         if "equivariance" in losses_to_be_computed:
             flips = torch.tensor([meta.get("flip", False) for meta in image_metas], device=self.device).reshape(-1, 1)
             idxs = [
-                i * meta["num_copies"] * meta["num_frames"] + j * meta["num_copies"] + offset
-                for i, meta in enumerate(image_metas)
-                for j in range(meta["num_copies"])
-                for k in range(1, meta["num_frames"])
-                for offset in (0, k)
+                m * meta["num_copies"] * meta["num_frames"]
+                + c * meta["num_frames"]
+                + f
+                for m, meta in enumerate(image_metas)
+                for c in range(meta["num_copies"])
+                for f in range(meta["num_frames"])
             ]
             loss = self.losses["equivariance"]
             list_features0, list_features1, list_encoder_features0, list_encoder_features1, list_points3d0, list_points3d1, list_poses0, list_poses1, list_flips0, list_flips1, matcher_metrics = match_features(

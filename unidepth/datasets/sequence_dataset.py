@@ -223,7 +223,8 @@ class SequenceDataset(BaseDataset):
             if num_samples_sequence < 2 or self.sampling_window_size < 1:
                 raise ValueError("Cannot pick two distinct samples under these conditions.")
 
-            idx1 = np.random.randint(num_samples_sequence)
+            # idx1 = np.random.randint(num_samples_sequence)
+            idx1 = keyframe_idx if keyframe_idx is not None else 0
 
             # Number of possible candidates excluding i itself
             low = max(0, idx1 - self.sampling_window_size)
