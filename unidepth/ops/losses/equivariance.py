@@ -33,6 +33,8 @@ class EqSelfDistill(nn.Module):
         self.inverse_change_base = inverse_change_base
         self.eps: float = eps
         self.use_gt = use_gt
+        if use_gt == False:
+            raise RuntimeError("THIS METHOD WAS MOVED TO MATCHER AND HAS NOT BEEN IMPLEMENTED")
         self.init_std_dev = init_std_dev
 
         # Validate parameters

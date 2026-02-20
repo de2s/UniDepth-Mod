@@ -299,7 +299,7 @@ class UniDepthV1(
             losses["opt"][loss.name] = loss.weight * invariance_losses.mean()
             losses_to_be_computed.remove("invariance")
 
-        # Equivariance loss
+        # Match features for equivariant related losses
         if "equivariance" in losses_to_be_computed:
             flips = torch.tensor([meta.get("flip", False) for meta in image_metas], device=self.device).reshape(-1, 1)
             idxs = [
@@ -310,7 +310,6 @@ class UniDepthV1(
                 for c in range(meta["num_copies"])
                 for f in range(meta["num_frames"])
             ]
-            loss = self.losses["equivariance"]
             list_features0, list_features1, list_encoder_features0, list_encoder_features1, list_points3d0, list_points3d1, list_poses0, list_poses1, list_flips0, list_flips1, matcher_metrics = match_features(
                 image = inputs["image_original"][idxs],
                 feature = outputs["cond_features"][idxs],
@@ -322,10 +321,13 @@ class UniDepthV1(
                 poses = inputs["cam2w"][idxs],
                 mask = inputs["depth_mask"][idxs],
                 flips = flips[idxs],
-                use_gt = loss.use_gt,
+                use_gt = True, # TODO: PARAMETRIZE THIS PARAMETER
                 log=log,
                 step=step
             )
+        # Equivariance loss
+        if "equivariance" in losses_to_be_computed:
+            loss = self.losses["equivariance"]
             equivariance_losses, identity_penalty_loss = loss(
                 list_features0, list_features1, 
                 list_encoder_features0, list_encoder_features1,
