@@ -51,24 +51,16 @@
            "output_fn": "sqrt"
          },
          "equivariance": {
-            "name": "EqSelfDistill2",
+            "name": "EquivarianceLoss", // ["EquivarianceLoss", "LocalEquivarianceLoss"]
             "weight": 0.1,
             "output_fn": "sqrt",
             "feature_dim": 512,
             "change_base": false,
             "inverse_change_base": false,
-            //"transform_generation": "SO(3)->Irreps",
-            "representation_type": null,
-            //"representation_type": "512x0e", 
-            //"representation_type": "1x0e+1x255e",
-            "transform_generation": "SO(3)->SO(n)",
-            //"transform_generation": "Generator->SO(n)",
-            "identity_penalty_factor": 0.0,
-            "identity_penalty_sigma": 0.1,
-            "use_gt": true,
-            "init_std_dev": 0.001,
-            "max_patches_match": -1,
-         },
+            "transform_generator_type": "GeneratorSE3toGLn", // ["GeneratorSO3toSOn", "GeneratorSE3toGLn"]
+            "transform_generator_config" : { },
+            "max_patches": 100
+         }
       }
    },
    "data":{

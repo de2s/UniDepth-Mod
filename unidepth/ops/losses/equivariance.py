@@ -1,248 +1,130 @@
-import math
-import ot
+from typing import List
+
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-from typing import Tuple
-from einops import rearrange
-from aim import Image, Distribution
-from e3nn.o3 import Irreps
-from unidepth.utils.geometric import generate_rays, invert_matrix, matrix_to_angles, gather_nearest_patch_center_samples
-from unidepth.utils.logger import getAimRun, log_equivariant_loss_artifacts, save_point_cloud
-from unidepth.utils.visualization import colorize
-from unidepth.ops.metrics import bbox_intersections, voxelized_intersections
 
-from .utils import FNS, masked_mean
+from unidepth.utils.geometric import invert_matrix
+import unidepth.ops.losses.generators as generators
+
 from .utils import FNS
 
+class EquivarianceLoss(nn.Module):
 
-class EqSelfDistill(nn.Module):
-
-    def __init__(self, weight: float, transform_generation: str, representation_type: str, identity_penalty_factor: float, identity_penalty_sigma: float, feature_dim: int, output_fn: str = "sqrt",  eps: float = 1e-5, change_base: bool = False, inverse_change_base: bool = False, use_gt: bool = True, init_std_dev: float = 1e-3):
+    def __init__(
+            self, 
+            weight: float, 
+            transform_generator_type: str,
+            transform_generator_config: dict, 
+            feature_dim: int, 
+            output_fn: str = "sqrt", 
+            eps: float = 1e-5, 
+            change_base: bool = False, 
+            inverse_change_base: bool = False,
+    ):
         super().__init__()
+
+        # Save config
         self.name: str = self.__class__.__name__
         self.weight: float = weight
         self.dims = (-2, -1)
         self.output_fn = FNS[output_fn]
-        self.transform_generation = transform_generation
-        self.representation_type = representation_type
-        self.identity_penalty_factor = identity_penalty_factor
-        self.identity_penalty_sigma = identity_penalty_sigma
+        self.transform_generator_type = transform_generator_type
+        self.transform_generator_config = transform_generator_config
         self.feature_dim = feature_dim
         self.change_base = change_base
         self.inverse_change_base = inverse_change_base
         self.eps: float = eps
-        self.use_gt = use_gt
-        if use_gt == False:
-            raise RuntimeError("THIS METHOD WAS MOVED TO MATCHER AND HAS NOT BEEN IMPLEMENTED")
-        self.init_std_dev = init_std_dev
 
-        # Validate parameters
+        # Validate change of base parameters
         if change_base == False and inverse_change_base == True:
             raise ValueError(f"Invalid configuration: 'inverse_change_base' only can be True if 'change_base' is True.")
-
+        
+        # Create change of base matrix
         if self.change_base:
             self.change_base_generator = nn.Parameter(torch.zeros(self.feature_dim,self.feature_dim))
 
-        if self.transform_generation == "SO(3)->Irreps":
-            self.transform_generator = GeneratorSO3toIrreps(representation_type)
-        elif self.transform_generation == "SO(3)->SO(n)":
-            self.transform_generator = GeneratorSO3toSOn(self.feature_dim, self.init_std_dev)
-        elif self.transform_generation == "Generator->SO(n)":
-            self.transform_generator = GeneratorGtoSOn(self.feature_dim)
+        # Create transform generator
+        cls = getattr(generators, transform_generator_type)
+        self.transform_generator = cls(feature_dim, transform_generator_config)
 
     @torch.autocast(device_type="cuda", enabled=False, dtype=torch.float32)
     def forward(
         self,
-        image: torch.Tensor, # Used only for debugging
-        feature: torch.Tensor,
-        encoder_features: list,
-        depth: torch.Tensor,
-        intrinsics: torch.Tensor,
-        estimated_depth: torch.Tensor,
-        estimated_intrinsics: torch.Tensor,
-        poses: torch.Tensor,
-        mask: torch.Tensor,
-        flips: torch.Tensor,
-        patch_size=14,
+        list_features0: List[torch.Tensor | None], list_features1: List[torch.Tensor | None],
+        list_points3d0: List[torch.Tensor | None], list_points3d1: List[torch.Tensor | None],
+        list_poses0: List[torch.Tensor | None], list_poses1: List[torch.Tensor | None],
+        list_flips0: List[torch.Tensor | None], list_flips1: List[torch.Tensor | None],
         log = False,
         step = -1
-    ) -> Tuple[torch.Tensor, torch.Tensor | None, dict]:
-
+    ) -> dict:
+        
         # Copy log variable because this function should only log the first iteration
         should_log = log
-        metrics = {}
 
-        # Choose between ground truth or estimated data
-        depth = depth if self.use_gt else estimated_depth
-        mask = mask if self.use_gt else torch.ones_like(mask, dtype=torch.bool)
-        K = intrinsics if self.use_gt else estimated_intrinsics
-
-        # Calculate number of patches
-        B, _, H, W = depth.shape
-        device = depth.device
-        assert W % patch_size == 0 and H % patch_size == 0
-        num_patches_x, num_patches_y = W // patch_size, H // patch_size
-
-        # Generate rays     
-        rays_flat, _ = generate_rays(K, (H, W))
-
-        # Retroproject points
-        depth_flat = rearrange(depth, "b c h w -> b (h w) c")
-        points3d_flat = torch.stack([
-            rays_flat[..., 0] * depth_flat[..., 0] / rays_flat[..., 2],
-            rays_flat[..., 1] * depth_flat[..., 0] / rays_flat[..., 2],
-            depth_flat[..., 0]
-        ], dim=-1)
-        mask_flat = rearrange(mask, "b c h w -> b (h w) c")
-        
-        # Transform to global coordinates
-        B, N, _ = points3d_flat.shape
-        ones = torch.ones(B, N, 1, device=points3d_flat.device)
-        points3d_flat = torch.cat([points3d_flat, ones], dim=-1)
-        points3d_flat = torch.bmm(poses, points3d_flat.transpose(-2, -1))
-        points3d_flat = points3d_flat.permute(0, 2, 1)[:, :, :3]   # Drop the homogeneous coordinate
-        
-        # Calculate intersection over union metrics
-        box_ious, box_ioas, box_iobs = [], [], []
-        vox_ious, vox_ioas, vox_iobs = [], [], []
-        for i in range(B // 2):
-            left, right = 2 * i, 2 * i + 1
-            mask0_flat, mask1_flat = mask_flat[left], mask_flat[right]
-            points3d0_flat, points3d1_flat = points3d_flat[left][mask0_flat.squeeze(-1)], points3d_flat[right][mask1_flat.squeeze(-1)]
-            box_iou, box_ioa, box_iob = bbox_intersections(points3d0_flat, points3d1_flat)
-            box_ious.append(box_iou); box_ioas.append(box_ioa); box_iobs.append(box_iob)
-            vox_iou, vox_ioa, vox_iob = voxelized_intersections(points3d0_flat, points3d1_flat, factor=0.1)
-            vox_ious.append(vox_iou); vox_ioas.append(vox_ioa); vox_iobs.append(vox_iob)
-        box_ious = torch.cat([t.unsqueeze(0) for t in box_ious], dim=0); box_ioas = torch.cat([t.unsqueeze(0) for t in box_ioas], dim=0); box_iobs = torch.cat([t.unsqueeze(0) for t in box_iobs], dim=0)
-        vox_ious = torch.cat([t.unsqueeze(0) for t in vox_ious], dim=0); vox_ioas = torch.cat([t.unsqueeze(0) for t in vox_ioas], dim=0); vox_iobs = torch.cat([t.unsqueeze(0) for t in vox_iobs], dim=0)
-
-        # Log input point cloud
-        if should_log:
-            metrics["BoxIntersectionOverUnionSample"] = box_ious[0]
-            metrics["VoxIntersectionOverUnionSample"] = vox_ious[0]
-            save_point_cloud(
-                f"artifacts/train/point_cloud_{step:06d}",
-                torch.cat([points3d_flat[0], points3d_flat[1]], dim=0),
-                torch.cat([
-                    torch.tensor([0, 255, 0], dtype=torch.uint8).repeat(points3d_flat[0].shape[0], 1),
-                    torch.tensor([255, 0, 0], dtype=torch.uint8).repeat(points3d_flat[1].shape[0], 1)
-                    ],
-                    dim=0
-                )
-            )
-
-        # Choose the ray closest to the patch center
-        rays = rearrange(rays_flat, "b (h w) c -> b c h w", h=H, w=W)
-        points3d = rearrange(points3d_flat, "b (h w) c -> b c h w", h=H, w=W) 
-        depth, rays, points3d, mask, points2d = gather_nearest_patch_center_samples(depth, rays, points3d, mask, patch_size)        
-
-        # Flatten tensors                                     
-        # depth_flat = rearrange(depth, "b c h w -> b (h w) c")
-        # rays_flat = rearrange(rays, "b c h w -> b (h w) c")
-        points3d_flat = rearrange(points3d, "b c h w -> b (h w) c")
-        mask_flat = rearrange(mask, "b c h w -> b (h w) c")
-        points2d_flat = rearrange(points2d, "b c h w -> b (h w) c")
-        features_flat = rearrange(feature, "b c h w -> b (h w) c")
-        
         # Create change of basis matrixes
         change_base = torch.matrix_exp(self.change_base_generator) if self.change_base else None
         change_base_inv = torch.matrix_exp(-self.change_base_generator) if self.inverse_change_base else None
 
-        # Iterate samples
+        # Iterate pairs of samples
         features0, features1 = [], []
-        transformations = []
-        for i in range(B // 2):
-            left, right = 2 * i, 2 * i + 1
-            image0, image1 = (image[left], image[right]) if image is not None else (None, None)
-            points3d0, points3d1 = points3d_flat[left], points3d_flat[right]
-            points2d0, points2d1 = points2d_flat[left], points2d_flat[right]
-            feature0, feature1 = features_flat[left], features_flat[right]
-            pose0, pose1 = poses[left], poses[right]
-            mask0, mask1 = mask_flat[left], mask_flat[right]
-            flip0, flip1 = flips[left], flips[right]
-
+        # transformations = []
+        for (
+            feature0, feature1, 
+            points3d0, points3d1, 
+            pose0, pose1, 
+            flip0, flip1
+         ) in zip(
+            list_features0, list_features1, 
+            list_points3d0, list_points3d1, 
+            list_poses0, list_poses1, 
+            list_flips0, list_flips1
+        ):
+            
             # Check that both images were rotated together
             assert flip0 == flip1
 
-            # Skip pair if cloud points doesn't intersect
-            if vox_ious[i] < 0.2:
-                print(f"Warning: Skip pair of frames because IoU is too low: {vox_ious[i]}")
+            # Skip if there are not matched features for the pair of frames
+            if feature0 == None and feature1 == None:
                 continue
 
-            if self.use_gt:
-                mask0, mask1 = mask0.squeeze(), mask1.squeeze()
-                points3d0 = points3d0[mask0]
-                points3d1 = points3d1[mask1]
-                points2d0 = points2d0[mask0]
-                points2d1 = points2d1[mask1]
-                feature0 = feature0[mask0]
-                feature1 = feature1[mask1]
+            # Verify shapes
+            assert feature0.shape == feature1.shape and points3d0.shape == points3d1.shape and pose0.shape == pose1.shape and flip0 == flip1
 
-            # Log number of points    
-            if should_log:
-                metrics["NumSelectedPointsSample"] = torch.tensor(points3d0.size(0) + points3d1.size(0))
-
-            # Calculate matrix of distances between 3D points
-            distances = torch.cdist(points3d0, points3d1, p=2)
-
-            # Compute matching plan 
-            reg = 0.05       # entropy regularization
-            reg_m = 1.0      # mass relaxation for unbalanced OT
-            A = torch.ones(points3d0.shape[0], device=points3d0.device)
-            B = torch.ones(points3d1.shape[0], device=points3d1.device)
-            A /= A.sum()
-            B /= B.sum()            
-            # defaults: method='sinkhorn', reg_type='kl', numItermax=1000, stopThr=1e-6, verbose=False
-            plan = ot.unbalanced.sinkhorn_unbalanced(A, B, distances, reg, reg_m) # TODO: CHECK DISTANCE SQUARED
-            
-            # Calculate costs using unbalanced optimal transport
-            matches_a = torch.argmax(plan, dim=1)  # For each A[i], best B[j]
-            matches_b = torch.argmax(plan, dim=0)  # For each B[i], best A[j]
-
-            # Get mutual matches
-            matches_a_indices = torch.arange(matches_a.size(0), device=device)
-            mutual_mask = matches_b[matches_a] == matches_a_indices  # only keep if mutual
-            matches = torch.stack([matches_a_indices[mutual_mask], matches_a[mutual_mask]], dim=1)
-
-            # Skip if there is not matches
-            if len(matches) == 0:
-                continue
-
-            # Log artifacts if needed
-            if should_log:
-
-                print("Logging Artifacts.")
-
-                log_equivariant_loss_artifacts(
-                    image0=image0, image1=image1, 
-                    mask0=rearrange(mask0, "(h w) -> h w", h=num_patches_y, w=num_patches_x), mask1=rearrange(mask1, "(h w) -> h w", h=num_patches_y, w=num_patches_x), 
-                    feature0=feature0, feature1=feature1,
-                    list_encoder_feature0=None, list_encoder_feature1=None, list_encoder_indexes=None,
-                    points2d0=points2d0, points2d1=points2d1,
-                    matches=matches,
-                    step = step
-                )
-            
-            # Filter out not matched points
-            feature0 = feature0[matches[:, 0]]
-            feature1 = feature1[matches[:, 1]]
-
-            # Track number of matched points
-            if should_log:
-                metrics["NumMatchedFeaturesSample"] = torch.tensor(feature0.size(0))
+            # Get the number of samples
+            num_samples = feature0.shape[0]
 
             # Change of base for the feature vectors
             feature0_transformed = torch.matmul(change_base, feature0.T).T if change_base else feature0
             feature1_transformed = torch.matmul(change_base, feature1.T).T if change_base else feature1
-            
-            # Rotate vectors
-            transformation0 = self.transform_generator.getTransformation(pose0, pose1, should_log, step)
-            feature0_transformed = torch.matmul(transformation0, feature0_transformed.T).T
-            transformations.append(transformation0)
-            transformation1 = self.transform_generator.getTransformation(pose1, pose0, should_log, step)
-            feature1_transformed = torch.matmul(transformation1, feature1_transformed.T).T
-            transformations.append(transformation1)
+
+            # Compute relative poses
+            pose0_inv = invert_matrix(pose0)
+            pose0_rel = pose0_inv @ pose1
+            pose1_inv = invert_matrix(pose1)
+            pose1_rel = pose1_inv @ pose0
+
+            # Transform features
+            transformation0 = self.transform_generator.getTransformation(pose0_rel[:3, :3], pose0_rel[:3, 3], should_log, step)
+            if transformation0.shape[1] == feature0_transformed.shape[1] and transformation0.shape[1] == feature0_transformed.shape[1]:
+                # Normal transformation
+                feature0_transformed = torch.einsum('bij,bi->bj', transformation0, feature0_transformed)
+            elif transformation0.shape[1] == feature0_transformed.shape[1] + 1 and transformation0.shape[1] == feature0_transformed.shape[1] + 1:
+                # Homogeneous transformation
+                ones = torch.ones(num_samples, 1, device=feature0_transformed.device, dtype=feature0_transformed.dtype)
+                feature0_transformed = torch.cat([feature0_transformed, ones], dim=1)
+                feature0_transformed = torch.einsum('bij,bi->bj', transformation0, feature0_transformed)
+                feature0_transformed = feature0_transformed[:, :-1]
+            #transformations.append(transformation0)
+            transformation1 = self.transform_generator.getTransformation(pose1_rel[:3, :3], pose1_rel[:3, 3], should_log, step)
+            if transformation1.shape[1] == feature1_transformed.shape[1] and transformation1.shape[1] == feature1_transformed.shape[1]:
+                feature1_transformed = torch.einsum('bij,bi->bj', transformation1, feature1_transformed)
+            elif transformation1.shape[1] == feature1_transformed.shape[1] + 1 and transformation1.shape[1] == feature1_transformed.shape[1] + 1:
+                # Homogeneous transformation
+                ones = torch.ones(num_samples, 1, device=feature1_transformed.device, dtype=feature1_transformed.dtype)
+                feature1_transformed = torch.cat([feature1_transformed, ones], dim=1)
+                feature1_transformed = torch.einsum('bij,bi->bj', transformation1, feature1_transformed)
+                feature1_transformed = feature1_transformed[:, :-1]
+            #transformations.append(transformation1)
 
             # Revert change of base for the feature vectors
             feature0_transformed = torch.matmul(change_base_inv, feature0_transformed.T).T if change_base_inv else feature0_transformed
@@ -257,7 +139,7 @@ class EqSelfDistill(nn.Module):
             # Log only the first iteration
             should_log = False
 
-        # Compute aggregated loss
+        # Compute aggregated losses
         if len(features0) > 0 and len(features1) > 0:
             features0 = torch.cat(features0, dim=0)
             features1 = torch.cat(features1, dim=0)
@@ -266,22 +148,14 @@ class EqSelfDistill(nn.Module):
             # If Does not contribute to gradients if image pair is skipped
             print("Warning: Empty loss")
             # HACK: Create a zero that stays in the computational graph to avoid exceptions
+            device = "cuda"
             dummy = torch.zeros(1, device=device)
             for p in self.parameters():
                 dummy = dummy + (p.sum() * 0.0)
             loss = dummy
 
-        # Compute identity penalty loss
-        identity_penalty_loss = None
-        if self.identity_penalty_factor != 0.0:
-            if len(transformations) != 0:
-                transformations = torch.stack(transformations, dim=0)
-                identity_penalty_loss = self.identity_penalty_loss(transformations, self.identity_penalty_sigma)
-            else:
-                identity_penalty_loss = torch.zeros(1, device=device)
+        return loss
 
-        return loss, identity_penalty_loss, metrics
-    
     def loss(
         self,
         features0: torch.Tensor,
@@ -296,204 +170,17 @@ class EqSelfDistill(nn.Module):
 
         # Equivariant loss
         equivariant_loss = 1 - torch.abs(cos_theta)
-        return self.output_fn(equivariant_loss + self.eps) # QUESTION: WHAT IS THIS FUNCTION FOR (SQRT)
-
+        return self.output_fn(equivariant_loss + self.eps)
     
-    def identity_penalty_loss(
-        self,
-        transformations: torch.Tensor,
-        sigma: float = 0.1,
-    ) -> torch.Tensor:
- 
-        # Extract diagonals -> (B, N)
-        diag = torch.diagonal(transformations, dim1=-2, dim2=-1)
-        diag = torch.abs(diag)
-
-        # Peak at 1, decay away from 1
-        penalty = torch.exp(-((diag - 1.0) ** 2) / (2 * sigma ** 2))
-        return penalty
-
     @classmethod
     def build(cls, config):
         obj = cls(
             weight=config["weight"],
-            transform_generation = config["transform_generation"],
-            representation_type = config["representation_type"],
-            identity_penalty_factor = config["identity_penalty_factor"],
-            identity_penalty_sigma = config["identity_penalty_factor"], 
+            transform_generator_type = config["transform_generator_type"],
+            transform_generator_config = config["transform_generator_config"], 
             feature_dim=config["feature_dim"],
             output_fn=config["output_fn"],
             change_base=config["change_base"],
-            inverse_change_base=config["inverse_change_base"],
-            use_gt = config["use_gt"],
-            init_std_dev = config["init_std_dev"],
+            inverse_change_base=config["inverse_change_base"]
         )
         return obj
-
-class GeneratorSO3toIrreps(nn.Module):
-
-    def __init__(self, representation_type: str):
-
-        super().__init__()
-        self.representation_type = representation_type
-
-        # Generate irreps
-        self.irreps = Irreps(representation_type)
-
-    def getTransformation(self, pose0: torch.Tensor, pose1: torch.Tensor, log = False, step = -1):
-
-        # Compute relative pose
-        pose0_inv = invert_matrix(pose0)
-        pose_rel = pose0_inv @ pose1
-        
-        # Compute the block-diagonal rotation matrix in the irreps space
-        alpha, beta, gamma = matrix_to_angles(pose_rel[:3, :3].cpu())
-        R = self.irreps.D_from_angles(alpha, beta, gamma).to(pose_rel.device)
-
-        # Log relative pose angles and distances
-        if log:
-            run = getAimRun()
-            run.track(
-                {
-                    "train/equivariance/relative_pose/alpha": alpha,
-                    "train/equivariance/relative_pose/beta": beta,
-                    "train/equivariance/relative_pose/gamma": gamma,
-                    "train/equivariance/relative_pose/x": pose_rel[0, 3],
-                    "train/equivariance/relative_pose/y": pose_rel[1, 3],
-                    "train/equivariance/relative_pose/z": pose_rel[2, 3],
-                },
-                context={"subset": "train"},
-                step=step
-            )
-            run.track(Image(colorize(R.detach().cpu().numpy(), cmap="gray")), name="train/equivariance/rotation_matrix", context={"subset": "train"}, step=step)
-            run.track(Distribution(R.detach().cpu().numpy()), name=f"train/equivariance/rotation_matrix_distribution", context={"subset": "train"}, step=step)
-            
-        return R
-
-
-class GeneratorSO3toSOn(nn.Module):
-
-    def __init__(self, feature_dim, init_std_dev):
-
-        super().__init__()
-        self.feature_dim = feature_dim
-        self.rotation_decoder = MonotonicAngleDecoder(init_std_dev=init_std_dev)
-
-    def getTransformation(self, pose0: torch.Tensor, pose1: torch.Tensor, log = False, step = -1):
-
-        # Compute relative position
-        pose0_inv = invert_matrix(pose0)
-        pose_rel = pose0_inv @ pose1
-
-        # Compute input angles
-        alpha, beta, gamma = matrix_to_angles(pose_rel[:3, :3])
-        input_angles = torch.tensor([alpha, beta, gamma], device=pose_rel.device)
-        generator_angles = self.rotation_decoder(input_angles)
-
-        # Check number of angles
-        nun_angles = self.feature_dim * (self.feature_dim - 1) // 2
-        assert generator_angles.numel() == nun_angles
-
-        # Generate rotation matrix
-        generator_matrix = torch.zeros((self.feature_dim, self.feature_dim), device=generator_angles.device)
-
-        # Get indices for upper triangle and fill upper and lower parts
-        rows, cols = torch.triu_indices(self.feature_dim, self.feature_dim, offset=1)
-        generator_matrix[rows, cols] = generator_angles
-        generator_matrix[cols, rows] = -generator_angles
-
-        # Generate rotation matrix
-        rotation_matrix = torch.matrix_exp(generator_matrix)
-
-        # Log relative pose angles and distances
-        if log:
-            run = getAimRun()
-            run.track(
-                {
-                    "train/equivariance/relative_pose/alpha": alpha,
-                    "train/equivariance/relative_pose/beta": beta,
-                    "train/equivariance/relative_pose/gamma": gamma,
-                    "train/equivariance/relative_pose/x": pose_rel[0, 3],
-                    "train/equivariance/relative_pose/y": pose_rel[1, 3],
-                    "train/equivariance/relative_pose/z": pose_rel[2, 3]
-                },
-                context={"subset": "train"},
-                step=step
-            )
-            run.track(Distribution(generator_matrix.detach().cpu().numpy()), name=f"train/equivariance/generator_matrix_distribution", context={"subset": "train"}, step=step)
-            run.track(Distribution(rotation_matrix.detach().cpu().numpy()), name=f"train/equivariance/rotation_matrix_distribution", context={"subset": "train"}, step=step)
-            run.track(Image(colorize(rotation_matrix.detach().cpu().numpy(), cmap="gray")), name="train/equivariance/rotation_matrix", context={"subset": "train"}, step=step)
-
-        return rotation_matrix
-
-
-class MonotonicAngleDecoder(nn.Module):
-
-    def __init__(
-        self, 
-        init_value=math.pi,
-        init_std_dev = 1e-3
-    ):
-        super().__init__()
-
-        # --- Initialization ---
-        self.fc1 = nn.Linear(3, 128)
-        self.fc2 = nn.Linear(128, 512)
-        self.fc3 = nn.Linear(512, 130816)
-
-        # Small weights for hidden layers
-        for fc in [self.fc1, self.fc2, self.fc3]:
-            nn.init.normal_(fc.weight, mean=0.0, std=init_std_dev)
-        
-        # Hidden biases zero
-        nn.init.constant_(self.fc1.bias, 0.0)
-        nn.init.constant_(self.fc2.bias, 0.0)
-
-        # Final bias = init_value for all outputs
-        nn.init.constant_(self.fc3.bias, init_value)
-
-    def forward(self, x):
-
-        # Move the tensor to the interval [0 to 2*pi]
-        x = (x + math.pi) % (2 * math.pi)
-    
-        x = F.relu(self.fc1(x))
-        x = F.relu(self.fc2(x))
-        x = F.relu(self.fc3(x))
-
-        # Move the tensor the the inverval [-pi to pi]
-        x = x % (2 * math.pi) - math.pi
-
-        return x
-
-class GeneratorGtoSOn(nn.Module):
-
-    def __init__(self, feature_dim):
-
-        super().__init__()
-        self.feature_dim = feature_dim
-        self.generator = nn.Parameter(torch.zeros(feature_dim * (feature_dim - 1) // 2))
-
-    def getTransformation(self, pose0: torch.Tensor, pose1: torch.Tensor, log = False, step = -1):
-
-        # Generate rotation matrix
-        generator_matrix = torch.zeros((self.feature_dim, self.feature_dim), device=self.generator .device)
-
-        # Get indices for upper triangle and fill upper and lower parts
-        rows, cols = torch.triu_indices(self.feature_dim, self.feature_dim, offset=1)
-        generator_matrix[rows, cols] = self.generator
-        generator_matrix[cols, rows] = -self.generator
-
-        # Generate rotation matrix
-        rotation_matrix = torch.matrix_exp(generator_matrix)
-
-        # Log relative pose angles and distances
-        if log:
-            run = getAimRun()
-            run.track(Distribution(generator_matrix.detach().cpu().numpy()), name=f"train/equivariance/generator_matrix_distribution", context={"subset": "train"}, step=step)
-            run.track(Distribution(rotation_matrix.detach().cpu().numpy()), name=f"train/equivariance/rotation_matrix_distribution", context={"subset": "train"}, step=step)
-            run.track(Image(colorize(rotation_matrix.detach().cpu().numpy(), cmap="gray")), name="train/equivariance/rotation_matrix", context={"subset": "train"}, step=step)
-
-        return rotation_matrix
-
-    

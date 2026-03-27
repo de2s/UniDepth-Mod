@@ -1,4 +1,3 @@
-import math
 import ot
 import torch
 from typing import List, Tuple
@@ -12,7 +11,6 @@ from unidepth.ops.metrics import bbox_intersections, voxelized_intersections
 def match_features(
     image: torch.Tensor, # Used only for debugging
     feature: torch.Tensor,
-    encoder_features: list,
     depth: torch.Tensor,
     intrinsics: torch.Tensor,
     estimated_depth: torch.Tensor,
@@ -24,7 +22,13 @@ def match_features(
     patch_size=14,
     log = False,
     step = -1
-) -> Tuple[ List[torch.Tensor | None], List[torch.Tensor | None], List[List[torch.Tensor]], List[List[torch.Tensor]], List[torch.Tensor | None], List[torch.Tensor | None], List[torch.Tensor | None], List[torch.Tensor | None], List[torch.Tensor | None], List[torch.Tensor | None], dict]:
+) -> Tuple[ 
+        List[torch.Tensor | None], List[torch.Tensor | None], 
+        List[torch.Tensor | None], List[torch.Tensor | None], 
+        List[torch.Tensor | None], List[torch.Tensor | None], 
+        List[torch.Tensor | None], List[torch.Tensor | None], 
+        dict
+    ]:
 
     # Copy log variable because this function should only log the first iteration
     should_log = log
@@ -95,17 +99,13 @@ def match_features(
     depth, rays, points3d, mask, points2d = gather_nearest_patch_center_samples(depth, rays, points3d, mask, patch_size)        
 
     # Flatten tensors                                     
-    # depth_flat = rearrange(depth, "b c h w -> b (h w) c")
-    # rays_flat = rearrange(rays, "b c h w -> b (h w) c")
     points3d_flat = rearrange(points3d, "b c h w -> b (h w) c")
     mask_flat = rearrange(mask, "b c h w -> b (h w) c")
     points2d_flat = rearrange(points2d, "b c h w -> b (h w) c")
     features_flat = rearrange(feature, "b c h w -> b (h w) c")
-    list_encoder_features_flat = [rearrange(encoder_feature,  "b h w c -> b (h w) c") for encoder_feature in encoder_features]
 
     # Iterate samples
     list_features0, list_features1 = [], []
-    list_encoder_features0, list_encoder_features1 = [], []
     list_points3d0, list_points3d1 = [], []
     list_poses0, list_poses1 = [], []
     list_flips0, list_flips1 = [], []
@@ -116,7 +116,6 @@ def match_features(
         points3d0, points3d1 = points3d_flat[left], points3d_flat[right]
         points2d0, points2d1 = points2d_flat[left], points2d_flat[right]
         feature0, feature1 = features_flat[left], features_flat[right]
-        list_encoder_feature0, list_encoder_feature1  = [encoders_feature_flat[left] for encoders_feature_flat in list_encoder_features_flat], [encoder_features_flat[right] for encoder_features_flat in list_encoder_features_flat]
         pose0, pose1 = poses[left], poses[right]
         mask0, mask1 = mask_flat[left], mask_flat[right]
         flip0, flip1 = flips[left], flips[right]
@@ -129,8 +128,6 @@ def match_features(
             print(f"Warning: Skip pair of frames because IoU is too low: {vox_ious[i]}")
             list_features0.append(None)
             list_features1.append(None)
-            list_encoder_features0.append(None)
-            list_encoder_features1.append(None)
             list_points3d0.append(None)
             list_points3d1.append(None)
             list_poses0.append(None)
@@ -147,8 +144,6 @@ def match_features(
             points2d1 = points2d1[mask1]
             feature0 = feature0[mask0]
             feature1 = feature1[mask1]
-            list_encoder_feature0 = [encoder_feature0[mask0] for encoder_feature0 in list_encoder_feature0]
-            list_encoder_feature1 = [encoder_feature1[mask1] for encoder_feature1 in list_encoder_feature1]
 
         # Log number of points    
         if should_log:
@@ -181,8 +176,6 @@ def match_features(
             print(f"Warning: Skip pair of frames because there are no matches.")
             list_features0.append(None)
             list_features1.append(None)
-            list_encoder_features0.append(None)
-            list_encoder_features1.append(None)
             list_points3d0.append(None)
             list_points3d1.append(None)
             list_poses0.append(None)
@@ -193,14 +186,12 @@ def match_features(
 
         # Log artifacts if needed
         if should_log:
-
             print("Logging Artifacts.")
-
             log_equivariant_loss_artifacts(
                 image0=image0, image1=image1, 
                 mask0=rearrange(mask0, "(h w) -> h w", h=num_patches_y, w=num_patches_x), mask1=rearrange(mask1, "(h w) -> h w", h=num_patches_y, w=num_patches_x), 
                 feature0=feature0, feature1=feature1,
-                list_encoder_feature0=list_encoder_feature0, list_encoder_feature1=list_encoder_feature0,
+                list_encoder_feature0=None, list_encoder_feature1=None,
                 points2d0=points2d0, points2d1=points2d1,
                 matches=matches,
                 step = step
@@ -211,8 +202,6 @@ def match_features(
         feature1 = feature1[matches[:, 1]]
         points3d0 = points3d0[matches[:, 0]]
         points3d1 = points3d1[matches[:, 1]]
-        list_encoder_feature0 = [encoder_feature0[matches[:, 0]] for encoder_feature0 in list_encoder_feature0]
-        list_encoder_feature1 = [encoder_feature1[matches[:, 1]] for encoder_feature1 in list_encoder_feature1]
 
         # Track number of matched points
         if should_log:
@@ -220,13 +209,10 @@ def match_features(
 
         # Check shapes
         assert feature0.shape == feature1.shape and points3d0.shape == points3d1.shape
-        for encoder_feature_a, encoder_feature_b in zip(list_encoder_feature0, list_encoder_feature1):
-            assert encoder_feature_a.shape == encoder_feature_b.shape
 
+        # Append data
         list_features0.append(feature0)
         list_features1.append(feature1)
-        list_encoder_features0.append(list_encoder_feature0)
-        list_encoder_features1.append(list_encoder_feature1)
         list_points3d0.append(points3d0)
         list_points3d1.append(points3d1)
         list_poses0.append(pose0)
@@ -235,6 +221,6 @@ def match_features(
         list_flips1.append(flip1)
 
     # Check lengths
-    assert len(list_features0) == len(list_features1) and len(list_encoder_features0) == len(list_encoder_features1) and len(list_points3d0) == len(list_points3d1) and len(list_poses0) == len(list_poses1) and len(list_flips0) == len(list_flips1)
+    assert len(list_features0) == len(list_features1) and len(list_points3d0) == len(list_points3d1) and len(list_poses0) == len(list_poses1) and len(list_flips0) == len(list_flips1)
     
-    return list_features0, list_features1, list_encoder_features0, list_encoder_features1, list_points3d0, list_points3d1, list_poses0, list_poses1, list_flips0, list_flips1, metrics
+    return list_features0, list_features1, list_points3d0, list_points3d1, list_poses0, list_poses1, list_flips0, list_flips1, metrics

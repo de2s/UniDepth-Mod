@@ -310,10 +310,15 @@ class UniDepthV1(
                 for c in range(meta["num_copies"])
                 for f in range(meta["num_frames"])
             ]
-            list_features0, list_features1, list_encoder_features0, list_encoder_features1, list_points3d0, list_points3d1, list_poses0, list_poses1, list_flips0, list_flips1, matcher_metrics = match_features(
+            (
+                list_features0, list_features1, 
+                list_points3d0, list_points3d1, 
+                list_poses0, list_poses1, 
+                list_flips0, list_flips1, 
+                matcher_metrics
+            ) = match_features(
                 image = inputs["image_original"][idxs],
                 feature = outputs["cond_features"][idxs],
-                encoder_features = [output[idxs] for output in outputs["encoder_outputs"]],
                 depth = inputs["depth"][idxs],
                 intrinsics = inputs["camera"].K[idxs],
                 estimated_depth = outputs["depth"][idxs],
@@ -321,16 +326,15 @@ class UniDepthV1(
                 poses = inputs["cam2w"][idxs],
                 mask = inputs["depth_mask"][idxs],
                 flips = flips[idxs],
-                use_gt = True, # TODO: PARAMETRIZE THIS PARAMETER
+                use_gt = True, # TODO: PARAMETRIZE THIS
                 log=log,
                 step=step
             )
         # Equivariance loss
         if "equivariance" in losses_to_be_computed:
             loss = self.losses["equivariance"]
-            equivariance_losses, identity_penalty_loss = loss(
+            equivariance_losses= loss(
                 list_features0, list_features1, 
-                list_encoder_features0, list_encoder_features1,
                 list_points3d0, list_points3d1,
                 list_poses0, list_poses1, 
                 list_flips0, list_flips1,
@@ -338,8 +342,6 @@ class UniDepthV1(
                 step=step
             )
             losses["opt"][loss.name] = loss.weight * equivariance_losses.mean()
-            if identity_penalty_loss is not None:
-                losses["opt"]["identity_penalty_loss"] = loss.identity_penalty_factor * identity_penalty_loss.mean()
             losses_to_be_computed.remove("equivariance")
             metrics.update(matcher_metrics)
 
