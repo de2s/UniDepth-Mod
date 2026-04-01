@@ -5,6 +5,7 @@ import torch.nn as nn
 
 from unidepth.utils.geometric import invert_matrix
 import unidepth.ops.losses.generators as generators
+from .equivariance_loss_functions import LOSS_FNS
 
 from .utils import FNS
 
@@ -16,6 +17,7 @@ class LocalEquivarianceLoss(nn.Module):
             transform_generator_type: str,
             transform_generator_config: dict, 
             feature_dim: int, 
+            loss_fn: str = "cos_sim",
             output_fn: str = "sqrt", 
             eps: float = 1e-5, 
             change_base: bool = False, 
@@ -28,6 +30,7 @@ class LocalEquivarianceLoss(nn.Module):
         self.name: str = self.__class__.__name__
         self.weight: float = weight
         self.dims = (-2, -1)
+        self.loss_fn = LOSS_FNS[loss_fn]
         self.output_fn = FNS[output_fn]
         self.transform_generator_type = transform_generator_type
         self.transform_generator_config = transform_generator_config
@@ -189,14 +192,8 @@ class LocalEquivarianceLoss(nn.Module):
         features1: torch.Tensor,
     ) -> torch.Tensor:
         
-        # Compute cosine similarity for each pair
-        dot = torch.sum(features0 * features1, dim=1) 
-        norm0 = torch.norm(features0, dim=1)
-        norm1 = torch.norm(features1, dim=1)
-        cos_theta = dot / (norm0 * norm1 + self.eps) 
-
-        # Equivariant loss
-        equivariant_loss = 1 - torch.abs(cos_theta)
+        # Compute configure metric as loss function
+        equivariant_loss = self.loss_fn(features0, features1)
         return self.output_fn(equivariant_loss + self.eps)
     
     def rotation_matrices_from_vectors(self, vec1, vec2):
@@ -239,6 +236,7 @@ class LocalEquivarianceLoss(nn.Module):
             transform_generator_type = config["transform_generator_type"],
             transform_generator_config = config["transform_generator_config"], 
             feature_dim=config["feature_dim"],
+            loss_fn=config["loss_fn"],
             output_fn=config["output_fn"],
             change_base=config["change_base"],
             inverse_change_base=config["inverse_change_base"],

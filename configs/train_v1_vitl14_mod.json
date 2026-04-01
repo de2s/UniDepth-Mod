@@ -59,6 +59,7 @@
             "inverse_change_base": false,
             "transform_generator_type": "GeneratorSE3toSEn", // ["GeneratorSO3toSOn", "GeneratorSE3toSEn", "GeneratorSE3toGLn"]
             "transform_generator_config" : { },
+            "loss_fn": "cos_sim", // ["cos_sim", "l2_dist"]
             "max_patches": 100
          }
          // "rotation_predictor": {
