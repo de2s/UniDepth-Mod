@@ -532,14 +532,17 @@ def main_worker(config: Dict[str, Any], args: argparse.Namespace):
 
             # Find and log infinite gradients 
             if not all(p.grad.isfinite().all() for p in model.parameters() if p.grad is not None):
+                log_nan, log_inf = True, True
                 for name, p in model.named_parameters():
                     if p.grad is not None:
                         # Check for NaN specifically
-                        if torch.isnan(p.grad).any():
+                        if log_nan and torch.isnan(p.grad).any():
                             print(f"NaN found in: {name}")
+                            log_nan = False
                         # If not finite and not NaN, it's Inf
-                        elif not p.grad.isfinite().all():
+                        elif log_inf and not p.grad.isfinite().all():
                             print(f"Inf found in: {name}")
+                            log_inf = False
             # TODO: CHECK PERFORMANCE DEGRADATION BECAUSE OF THIS
 
             scaler.step(optimizer)

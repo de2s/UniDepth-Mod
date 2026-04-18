@@ -130,7 +130,7 @@ class GeneratorSE3toSEn(AbstractGenerator):
             layer_sizes =  [3, 128, 512],
             init_weights = 0.0,
             init_std_devs = 1e-3,
-            init_bias = [0.0, 10.0]
+            init_bias = [0.0, 200.0]
         )
 
 
@@ -177,9 +177,9 @@ class GeneratorSE3toSEn(AbstractGenerator):
         output_rotation = torch.matrix_exp(generator_matrix)
 
         # Generate translation
-        translation = translation + 10.0
+        translation = translation + 200.0
         output_translation = self.translation_estimator(translation)
-        output_translation = output_translation - 10.0
+        output_translation = output_translation - 200.0
 
         # Log relative pose angles and distances
         if log:
@@ -243,7 +243,7 @@ class GeneratorSE3toGLn(AbstractGenerator):
             layer_sizes =  [3, 128, 512],
             init_weights = 0.0,
             init_std_devs = 1e-3,
-            init_bias = [0.0, 10.0]
+            init_bias = [0.0, 200.0]
         )
 
 
@@ -282,9 +282,9 @@ class GeneratorSE3toGLn(AbstractGenerator):
         output_transformation = torch.matrix_exp(generator_matrix)
 
         # Generate translation
-        translation = translation + 10.0
+        translation = translation + 200.0
         output_translation = self.translation_estimator(translation)
-        output_translation = output_translation - 10.0
+        output_translation = output_translation - 200.0
 
         # Log relative pose angles and distances
         if log:
