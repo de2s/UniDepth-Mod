@@ -40,10 +40,6 @@ class MonotonicMLP(nn.Module):
         
     def forward(self, x):
 
-        # Though ReLU fixes the problem of negative inputs, Monotonic MLP sould not receive negative values by design
-        if (x >= 0).all() == False:
-            print("Warning: MonotonicMLP input contains negative values.")
-
         # Apply all layers
         for layer in self.layers:
             x = F.relu(layer(x))

@@ -233,8 +233,7 @@
          // "MS2",               // Error: Invalid rotation matrixes
          // "ScanNetpp_F",       // Warning: Sequences need to be reordered 
       ],
-      "val_datasets": ["IBims", "ScanNet"],
-      "val_datasets_":[
+      "val_datasets":[
          // Image datasets from UniDepth
          "DDAD",
          "DiodeIndoor",

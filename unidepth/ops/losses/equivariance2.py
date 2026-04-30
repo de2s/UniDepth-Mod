@@ -121,18 +121,18 @@ class EqSelfDistill2(nn.Module):
             feature1_transformed = torch.einsum('bij,bi->bj', transformation1, feature1_transformed)
             transformations.append(transformation1)
 
-            # Verify rotations
-            dir2_rotated = torch.bmm(rotations0, dir2_cam0.unsqueeze(-1)).squeeze(-1) 
-            dot = (dir2_rotated * dir1_cam0).sum(dim=1)  # [664]
-            cos_angle = dot / (dir1_cam0.norm(dim=1) * dir2_cam0.norm(dim=1))
-            print("Minimum cos(angle):", cos_angle.min().item())
-            print("Maximum cos(angle):", cos_angle.max().item())
+            # # Verify rotations
+            # dir2_rotated = torch.bmm(rotations0, dir2_cam0.unsqueeze(-1)).squeeze(-1) 
+            # dot = (dir2_rotated * dir1_cam0).sum(dim=1)  # [664]
+            # cos_angle = dot / (dir1_cam0.norm(dim=1) * dir2_cam0.norm(dim=1))
+            # print("Minimum cos(angle):", cos_angle.min().item())
+            # print("Maximum cos(angle):", cos_angle.max().item())
 
-            dir1_rotated = torch.bmm(rotations1, dir2_cam1.unsqueeze(-1)).squeeze(-1) 
-            dot = (dir1_rotated * dir1_cam1).sum(dim=1)  # [664]
-            cos_angle = dot / (dir1_cam1.norm(dim=1) * dir2_cam1.norm(dim=1))
-            print("Minimum cos(angle):", cos_angle.min().item())
-            print("Maximum cos(angle):", cos_angle.max().item())
+            # dir1_rotated = torch.bmm(rotations1, dir2_cam1.unsqueeze(-1)).squeeze(-1) 
+            # dot = (dir1_rotated * dir1_cam1).sum(dim=1)  # [664]
+            # cos_angle = dot / (dir1_cam1.norm(dim=1) * dir2_cam1.norm(dim=1))
+            # print("Minimum cos(angle):", cos_angle.min().item())
+            # print("Maximum cos(angle):", cos_angle.max().item())
 
             # Revert change of base for the feature vectors
             feature0_transformed = torch.matmul(change_base_inv, feature0_transformed.T).T if change_base_inv else feature0_transformed
