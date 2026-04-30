@@ -4,6 +4,7 @@ import torch
 LOSS_FNS = {
     "cos_sim": lambda features0, features1: cos_sim(features0, features1),
     "l2_dist": lambda features0, features1: l2_dist(features0, features1),
+    "l1_dist": lambda features0, features1: l1_dist(features0, features1),
 }
 
 
@@ -23,4 +24,10 @@ def l2_dist(features0, features1):
 
     # Return L2 distance between vectors
     distances = torch.linalg.norm(features0 - features1, dim=1)
+    return distances
+
+def l1_dist(features0, features1):
+
+    # Return L2 distance between vectors
+    distances = torch.linalg.norm(features0 - features1, ord=1, dim=1)
     return distances

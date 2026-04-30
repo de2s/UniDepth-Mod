@@ -50,17 +50,28 @@
            "weight": 0.1,
            "output_fn": "sqrt"
          },
+         // "equivariance": {
+         //    "name": "LocalEquivarianceLoss", // ["EquivarianceLoss", "LocalEquivarianceLoss",]
+         //    "weight": 0.1,
+         //    "output_fn": "sqrt",
+         //    "feature_dim": 512,
+         //    "change_base": false,
+         //    "inverse_change_base": false,
+         //    "transform_generator_type": "GeneratorSE3toSEn", // ["GeneratorSO3toSOn", "GeneratorSE3toSEn", "GeneratorSE3toGLn"]
+         //    "transform_generator_config" : { },
+         //    "loss_fn": "l2_dist", // ["cos_sim", "l2_dist"]
+         //    "max_patches": 80
+         // }
          "equivariance": {
-            "name": "LocalEquivarianceLoss", // ["EquivarianceLoss", "LocalEquivarianceLoss"]
+            "name": "LocalDiscriminator",
             "weight": 0.1,
             "output_fn": "sqrt",
             "feature_dim": 512,
             "change_base": false,
             "inverse_change_base": false,
-            "transform_generator_type": "GeneratorSE3toSEn", // ["GeneratorSO3toSOn", "GeneratorSE3toSEn", "GeneratorSE3toGLn"]
-            "transform_generator_config" : { },
-            "loss_fn": "cos_sim", // ["cos_sim", "l2_dist"]
-            "max_patches": 100
+            "discriminator_type": "TransformEstimatorSO3", // ["TransformEstimatorSO3", "TransformEstimatorSOn"]
+            "discriminator_config" : { },
+            "loss_fn": "l1_dist", // ["cos_sim", "l2_dist"]
          }
          // "rotation_predictor": {
          //    "name": "FeatureRotationRegressor",
