@@ -130,8 +130,10 @@ class LocalEquivarianceLoss(nn.Module):
             rotations1 = self.rotation_matrices_from_vectors(dir1_cam1, dir2_cam1)
 
             # Get translations from vector 2 to vector 1
-            traslations0 = dir1_cam0 - dir2_cam0
-            traslations1 = dir1_cam1 - dir2_cam1
+            # traslations0 = dir1_cam0 - dir2_cam0
+            # traslations1 = dir1_cam1 - dir2_cam1
+            traslations0 = dir1_cam0 - dir1_cam1
+            traslations1 = dir1_cam1 - dir1_cam0
 
             # Transform features
             transformation0 = self.transform_generator.getTransformation(rotations0, traslations0, should_log, step)
