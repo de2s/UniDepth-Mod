@@ -124,18 +124,22 @@ class LocalDiscriminator(nn.Module):
             
             # Flatten rotation parameters
             idxs = torch.triu_indices(3, 3, offset=1, device=rotations0.device)
-            rotation_values0 = rotations0[:, idxs[0], idxs[1]]
-            rotation_values1 = rotations1[:, idxs[0], idxs[1]]
+            transformation0_values = rotations0[:, idxs[0], idxs[1]]
+            transformation1_values = rotations1[:, idxs[0], idxs[1]]
+
+            if self.discriminator_type == "TransformEstimatorSE3":
+                transformation0_values = torch.cat([transformation0_values, traslations0], dim=1)
+                transformation1_values = torch.cat([transformation1_values, traslations1], dim=1)
 
             # Regress rotation parameters
-            estimated_rotation_values0 = self.discriminator.getTransformParameters(feature0_transformed, feature1_transformed)
-            estimated_rotation_values1 = self.discriminator.getTransformParameters(feature1_transformed, feature0_transformed)
+            estimated_transform_values0 = self.discriminator.getTransformParameters(feature0_transformed, feature1_transformed)
+            estimated_transform_values1 = self.discriminator.getTransformParameters(feature1_transformed, feature0_transformed)
 
             # Aggregate results
-            features0.append(rotation_values0)
-            features1.append(estimated_rotation_values0)
-            features0.append(rotation_values1)
-            features1.append(estimated_rotation_values1)
+            features0.append(transformation0_values)
+            features1.append(estimated_transform_values0)
+            features0.append(transformation1_values)
+            features1.append(estimated_transform_values1)
 
             # Log only the first iteration
             should_log = False
