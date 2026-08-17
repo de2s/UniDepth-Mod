@@ -130,7 +130,7 @@ class GeneratorSE3toSEn(AbstractGenerator):
             layer_sizes =  [3, 128, 512],
             init_weights = 0.0,
             init_std_devs = 1e-3,
-            init_bias = [0.0, 50.0]
+            init_bias = [0.0, 200.0]
         )
 
 
@@ -243,7 +243,7 @@ class GeneratorSE3toGLn(AbstractGenerator):
             layer_sizes =  [3, 128, 512],
             init_weights = 0.0,
             init_std_devs = 1e-3,
-            init_bias = [0.0, 50.0]
+            init_bias = [0.0, 200.0]
         )
 
 

@@ -7,8 +7,10 @@ class ARKit(SequenceDataset):
     min_depth = 0.01
     max_depth = 10.0
     depth_scale = 1000.0
-    test_split = "Training.txt"
-    train_split = "Training.txt"
+    # test_split = "Training.txt"
+    # train_split = "Training.txt"
+    test_split = "val_.txt"
+    train_split = "train_.txt"
     sequences_file = "sequences.json"
     hdf5_paths = ["ARKitS.hdf5"]
 
