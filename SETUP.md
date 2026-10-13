@@ -1,8 +1,12 @@
-# Development Environment Setup for Equivariant Loss in UniDepth
+# UniDepth-Mod
+
+This is a fork of [UniDepth](https://github.com/lpiccinelli-eth/unidepth) by Picinelly et al., which has been modified to explore strategies and methods for incorporating equivariant behavior into its latent space representations, and to study its effects on model performance.
+
+## Development Environment Setup for Equivariant Loss in UniDepth
 
 This guide describes how to prepare the development environment required to train UniDepth with the equivariant loss. It covers system prerequisites, dependency installation, repository setup, and other necessary configuration steps to ensure the training pipeline runs reproducibly and without environment-related issues.
 
-## Prerequisites:
+### Prerequisites:
 
 The development environment has been validated with the following software versions:
 
@@ -19,7 +23,7 @@ If your Docker installation does not support the `docker compose` command, you n
 
 If your Docker Buildx version is earlier than 0.17, you may need to upgrade Docker. To check your current Buildx version, run: `docker buildx version`.
 
-## Clone the Source Code
+### Clone the Source Code
 
 Clone the repository onto your Linux machine:
 
@@ -34,7 +38,7 @@ cd cd UniDepth-Private/
 git checkout feat-equivariant-loss-2
 ```
 
-## Copy the Datasets
+### Copy the Datasets
 
 Place the dataset files in a directory on your Linux machine and keep a note of the path, as it will be needed later.
 
@@ -68,7 +72,7 @@ Test  | DTURMVD         | `dtu_rmvd.hdf5`
 
 These files are not publicly available due to redistribution restrictions. However, the original UniDepth repository includes a few sample files, which you can use to examine their structure and create your own HDF5 files.
 
-## Create a Folder for Storing Data
+### Create a Folder for Storing Data
 
 Running the UniDepth training script generates several files and directories, including:
 
@@ -80,7 +84,7 @@ Running the UniDepth training script generates several files and directories, in
 Create a directory on your Linux machine with sufficient storage to hold these files, and note the path, as it will be required later.
 
 
-## Set Up Visual Studio Code
+### Set Up Visual Studio Code
 
 If your Linux machine has a graphical interface, you can open the code repository directly in Visual Studio Code. Otherwise, you can run Visual Studio Code locally and connect to the Linux machine via SSH.
 
@@ -98,7 +102,7 @@ The UniDepth training pipeline with the equivariant loss is configured to run in
 
 To run the UniDepth training pipeline in Docker from Visual Studio Code, install the [Dev Containers](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers) extension. For detailed guidance on using Dev Containers, see the Visual Studio Code documentation on [containers](https://code.visualstudio.com/docs/devcontainers/containers).
 
-## Configuring your Development Environment
+### Configuring your Development Environment
 
 Before using Visual Studio Code with Dev Containers, you need to configure certain files to ensure it functions properly in your development environment.
 
@@ -278,7 +282,7 @@ Duplicate the `.devcontainer/devcontainer.json.sample` file as `devcontainer.jso
 
 You can also adjust other Dev Containers settings in this file as needed.
 
-## Open the Project in Dev Containers
+### Open the Project in Dev Containers
 
 In Visual Studio Code, open the Command Palette (View > Command Palette…), then select “Dev Containers: Rebuild and Reopen in Container”. This will build the container and reopen the project inside it.
 
@@ -286,7 +290,7 @@ The process may take several minutes, depending on your internet connection spee
 
 Once the project is open in the container, confirm that it has access to the host GPUs by running the `nvidia-smi` command. The output should display a summary table listing all available GPUs.
 
-## Fix ScanNet Dataset
+### Fix ScanNet Dataset
 
 The ScanNet dataset contains sequence frames that are not in chronological order. To train UniDepth with the equivariance loss, the frames must be properly ordered. To resolve this, run the `scripts/fix_scannet_dataset.py` script using a Visual Studio Code Terminal to ensure the command is executed within the container.
 
@@ -296,7 +300,7 @@ python ./scripts/fix_scannet_dataset.py
 
 This script will modify the original file in place. While reordering the frames does not affect Unidepth original functionality, it may impact the exact reproducibility of experiments performed prior to this update.
 
-## Download the Pre-Trained UniDepth Model.
+### Download the Pre-Trained UniDepth Model.
 
 To download the pre-trained weights for the UniDepth model, run the following command using a Visual Studio Code Terminal to ensure the command is executed within the container:
 
@@ -307,7 +311,7 @@ curl -L "https://huggingface.co/lpiccinelli/unidepth-v1-vitl14/resolve/main/pyto
 
 Ensure that the path to the pre-trained weights is correctly set in the `training`>`pretrained` section of the training configuration file `configs/train_v1_vitl14_mod.json`.
 
-## Configure Your UniDepth Experiment
+### Configure Your UniDepth Experiment
 
 Before running an experiment, adjust the parameters in the training configuration file, which can be found at `configs/train_v1_vitl14_mod.json`. If you create a new configuration file with a different name, update its path in the `scripts/train.sh` file on the corresponding line:
 
@@ -316,7 +320,7 @@ Before running an experiment, adjust the parameters in the training configuratio
 export CFG="train_v1_vitl14_mod.json"
 ```
 
-## Run the UniDepth Training Script
+### Run the UniDepth Training Script
 
 Before starting the training of UniDepth model, you should initialize the experiment tracking tool Aim by running the `scripts/aim.sh` script. Use a dedicated Visual Studio Code terminal to ensure it runs continuously inside the container.
 
